@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+uvloop
+httptools
+psycopg2
+psycopg-binary
+pydantic-core
+numpy
+pandas
+orjson
+lxml
+grpcio
+cryptography
+pyyaml
+regex

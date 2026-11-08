@@ -1,0 +1,8 @@
+# pinned, with hashes on a continuation line
+fastlib==2.0.0 \
+    --hash=sha256:00
+unpinned>=1.0  # resolved to latest
+winonly==311 ; sys_platform == "win32"
+-r extra.txt
+--index-url https://pypi.org/simple
+-e ./localpkg

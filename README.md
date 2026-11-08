@@ -1,0 +1,117 @@
+# wheelgap
+
+[![CI](https://github.com/patrickballard/wheelgap/actions/workflows/ci.yml/badge.svg)](https://github.com/patrickballard/wheelgap/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+
+**Find the Python dependencies that have no prebuilt wheel for your target platform, before your Docker build does.**
+
+Point it at your lockfile and the platforms you ship to (ARM servers, Alpine images, Windows on ARM, free-threaded Python 3.14t). It tells you which packages pip or uv will have to compile from source, and which can't be installed at all.
+
+![wheelgap demo](docs/demo.gif)
+
+## Install and run (under 30 seconds)
+
+With [uv](https://docs.astral.sh/uv/):
+
+```bash
+uvx --from git+https://github.com/patrickballard/wheelgap wheelgap
+```
+
+Or with pipx:
+
+```bash
+pipx run --spec git+https://github.com/patrickballard/wheelgap wheelgap
+```
+
+Run either one in a project directory. It finds `uv.lock`, `pylock.toml`, `poetry.lock` or `requirements.txt` on its own.
+
+## Usage
+
+```bash
+# Will my Alpine ARM image compile anything?
+wheelgap -p 3.13 -t alpine-arm64
+
+# Is my stack ready for free-threaded Python 3.14?
+wheelgap -p 3.14t -t all
+
+# Several Pythons at once, Linux on both architectures
+wheelgap uv.lock -p 3.12,3.13,3.14 -t linux-x86_64,linux-aarch64
+
+# No lockfile? Check packages directly (latest version, or pin one)
+wheelgap psycopg2 uvloop numpy==2.3.4 -t windows,win-arm64
+
+# Machine-readable, for scripts and CI
+wheelgap --json > wheelgap.json
+```
+
+Each cell in the table is one of:
+
+| cell | meaning |
+| --- | --- |
+| `✓` | a compatible wheel exists, so the install is fast |
+| `● source` | no wheel, only an sdist, so it compiles at install time (needs a compiler, headers, time) |
+| `✗ missing` | no wheel and no sdist, so the install fails |
+| `–` | not installed on this target (environment markers exclude it) |
+
+Packages that are fine everywhere are hidden; `--all` shows them.
+
+**Exit codes:** `0` no gaps, `1` gaps found, `2` bad input. `--exit-zero` always exits `0`.
+
+### Targets
+
+| name | aliases | wheel tags it accepts |
+| --- | --- | --- |
+| `linux-x86_64` | `linux`, `linux-amd64` | `manylinux_2_*_x86_64` up to `--glibc` (default 2.36), legacy `manylinux2014`/`2010`/`1` |
+| `linux-aarch64` | `linux-arm64` | `manylinux_2_*_aarch64` |
+| `musl-x86_64` | `alpine`, `musl` | `musllinux_1_*_x86_64` up to `--musl` (default 1.2) |
+| `musl-aarch64` | `alpine-arm64` | `musllinux_1_*_aarch64` |
+| `macos-arm64` | `macos`, `mac` | `macosx_*_arm64` and `universal2` up to `--macos` (default 14.0) |
+| `macos-x86_64` | `macos-intel` | `macosx_*_x86_64` and `universal2` |
+| `win-amd64` | `windows`, `win` | `win_amd64` |
+| `win-arm64` | `windows-arm64` | `win_arm64` |
+
+`-t all` checks all eight. Python versions take a trailing `t` for free-threaded builds (`3.14t`), which correctly rejects `abi3` wheels. Without `-p`, wheelgap uses the Python it is running on.
+
+### In CI (GitHub Action)
+
+```yaml
+- uses: actions/checkout@v7
+- uses: patrickballard/wheelgap@v0.1.0
+  with:
+    args: uv.lock -p 3.13 -t linux-x86_64,linux-aarch64
+```
+
+The job fails when a dependency would build from source on a target you ship, for example when a dependency bump drops ARM wheels.
+
+## How it works
+
+- **Lockfiles are read offline.** `uv.lock`, `pylock.toml` and `poetry.lock` already record every file published for each pinned version. wheelgap parses the wheel filenames' tags with [`packaging`](https://packaging.pypa.io/) and checks them against the exact tag set each target accepts. That is the same logic pip and uv use to pick a wheel.
+- **`requirements.txt` and bare package names** are looked up on the PyPI JSON API. Feed it a fully pinned file (from `uv pip compile`, `pip-compile` or `uv export`): wheelgap checks the lines you give it and doesn't resolve dependencies.
+- **Environment markers are respected.** A `pywin32 ; sys_platform == 'win32'` dependency won't show up as a Linux gap. For `uv.lock` the dependency graph is walked per target, so transitive platform-specific packages are handled too.
+- `--online` re-checks lockfile packages against PyPI. Use it when a project has uploaded new wheels for an existing version since you locked, or if your `uv.lock` was generated with `environments` restrictions.
+
+## Why this exists
+
+Missing wheels show up late, in the most expensive place:
+
+- Your `python:3.13-alpine` image on an ARM runner takes 25 minutes because two transitive dependencies don't publish `musllinux_aarch64` wheels, and QEMU is compiling them.
+- A build fails with `error: Microsoft Visual C++ 14.0 or greater is required` on a teammate's Snapdragon laptop.
+- You try free-threaded Python 3.14t and half your stack quietly falls back to source builds, because `abi3` wheels don't apply there.
+
+Sites like [pyreadiness.org](https://pyreadiness.org) and [free-threaded wheels](https://hugovk.github.io/free-threaded-wheels/) track the top few hundred packages. wheelgap checks your packages, at your pinned versions, for your targets, in about a second, and it can run in CI.
+
+## Roadmap
+
+- [ ] Pyodide/WebAssembly, iOS and Android targets
+- [ ] Read targets from `[tool.wheelgap]` in `pyproject.toml`
+- [ ] Private indexes (`--index-url`, the simple API)
+- [ ] Infer the target from a `Dockerfile` (`FROM python:3.13-alpine`, `--platform=linux/arm64`)
+- [ ] "Closest version with a wheel" hints (e.g. upgrade `foo` 1.2 → 1.4 to get `musllinux` wheels)
+- [ ] Publish to PyPI so it's just `uvx wheelgap`
+
+Contributions welcome. Issues labelled [good first issue](https://github.com/patrickballard/wheelgap/labels/good%20first%20issue) are a good start, and [CONTRIBUTING.md](CONTRIBUTING.md) has the 3-command dev setup.
+
+## License
+
+[MIT](LICENSE)

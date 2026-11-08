@@ -1,0 +1,43 @@
+name: Publish to PyPI
+
+# Uses PyPI trusted publishing (no API token). One-time setup:
+#   1. https://pypi.org/manage/account/publishing/ -> add a pending publisher:
+#      project "wheelgap", owner "patrickballard", repo "wheelgap", workflow "publish.yml", environment "pypi"
+#   2. Repo Settings -> Variables -> add PYPI_PUBLISH = true
+#   3. Run this workflow (Actions tab -> Publish to PyPI -> Run workflow), or publish a release.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: vars.PYPI_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+      - run: uv build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

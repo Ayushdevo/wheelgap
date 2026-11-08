@@ -1,0 +1,248 @@
+"""Command-line entry point."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import sysconfig
+
+from . import __version__
+from .check import Row, Status, check
+from .pypi import fill_all
+from .sources import SourceError, load_inputs
+from .targets import DEFAULT_PLATFORMS, PLATFORMS, Target, TargetError, build_targets
+
+EXAMPLES = """\
+examples:
+  wheelgap                                 check the lockfile in the current directory
+  wheelgap uv.lock -t musl-aarch64         will my Alpine ARM image build from source?
+  wheelgap -p 3.14t -t all                 is my stack ready for free-threaded 3.14?
+  wheelgap psycopg2 uvloop -t win-amd64    check packages without a lockfile
+  wheelgap requirements.txt --json         machine-readable output for CI
+"""
+
+
+def running_python() -> str:
+    ft = "t" if sysconfig.get_config_var("Py_GIL_DISABLED") else ""
+    return f"{sys.version_info.major}.{sys.version_info.minor}{ft}"
+
+
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="wheelgap",
+        description="Find the dependencies that have no prebuilt wheel for your target platform, "
+        "so they'd be compiled from source (slow) or fail to install.",
+        epilog=EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "inputs",
+        nargs="*",
+        metavar="INPUT",
+        help="uv.lock, pylock.toml, poetry.lock, requirements.txt, a directory, or package specs (default: .)",
+    )
+    p.add_argument(
+        "-p",
+        "--python",
+        action="append",
+        default=[],
+        metavar="VER",
+        help=f"target Python, e.g. 3.13 or 3.14t (repeatable; default: {running_python()})",
+    )
+    p.add_argument(
+        "-t",
+        "--target",
+        action="append",
+        default=[],
+        metavar="PLATFORM",
+        help=f"target platform (repeatable, or 'all'; default: {','.join(DEFAULT_PLATFORMS)})",
+    )
+    p.add_argument("--glibc", default="2.36", metavar="X.Y", help="glibc version for linux-* targets (default: 2.36)")
+    p.add_argument("--musl", default="1.2", metavar="X.Y", help="musl version for musl-* targets (default: 1.2)")
+    p.add_argument("--macos", default="14.0", metavar="X.Y", help="minimum macOS for macos-* targets (default: 14.0)")
+    p.add_argument(
+        "--online", action="store_true", help="re-check lockfile packages against PyPI instead of trusting the lockfile"
+    )
+    p.add_argument("--all", action="store_true", help="show every package, not just the ones with gaps")
+    p.add_argument("--json", action="store_true", help="print JSON instead of a table")
+    p.add_argument("--exit-zero", action="store_true", help="exit 0 even when gaps are found")
+    p.add_argument("--color", choices=["auto", "always", "never"], default="auto")
+    p.add_argument("--list-targets", action="store_true", help="list platform names and exit")
+    p.add_argument("-V", "--version", action="version", version=f"wheelgap {__version__}")
+    return p.parse_args(argv)
+
+
+class Style:
+    def __init__(self, enabled: bool):
+        self.enabled = enabled
+
+    def __call__(self, text: str, code: str) -> str:
+        return f"\033[{code}m{text}\033[0m" if self.enabled else text
+
+    def green(self, t: str) -> str:
+        return self(t, "32")
+
+    def yellow(self, t: str) -> str:
+        return self(t, "33")
+
+    def red(self, t: str) -> str:
+        return self(t, "31")
+
+    def dim(self, t: str) -> str:
+        return self(t, "2")
+
+    def bold(self, t: str) -> str:
+        return self(t, "1")
+
+
+def use_color(mode: str) -> bool:
+    if mode != "auto":
+        return mode == "always"
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return sys.stdout.isatty()
+
+
+CELL = {
+    Status.WHEEL: ("✓", "green"),
+    Status.SOURCE: ("● source", "yellow"),
+    Status.MISSING: ("✗ missing", "red"),
+    Status.UNKNOWN: ("? unknown", "dim"),
+    Status.NOT_NEEDED: ("–", "dim"),
+}
+
+
+def render_table(rows: list[Row], targets: list[Target], style: Style) -> list[str]:
+    multi_py = len({t.python for t in targets}) > 1
+    headers = ["package", "version"] + [t.label(multi_py) for t in targets]
+    body = []
+    for r in rows:
+        cells = [r.package.name, r.package.version or "?"]
+        cells += [CELL[r.results[t]][0] for t in targets]
+        body.append(cells)
+    widths = [max(len(h), *(len(c[i]) for c in body)) for i, h in enumerate(headers)]
+
+    def line(cells: list[str], colors: list[str] | None = None) -> str:
+        parts = []
+        for i, c in enumerate(cells):
+            padded = c.ljust(widths[i])
+            if colors and colors[i]:
+                padded = getattr(style, colors[i])(padded)
+            parts.append(padded)
+        return "  ".join(parts).rstrip()
+
+    out = [style.bold(line(headers))]
+    for r, cells in zip(rows, body, strict=True):
+        colors = ["", "dim"] + [CELL[r.results[t]][1] for t in targets]
+        out.append(line(cells, colors))
+    return out
+
+
+def report_json(rows: list[Row], targets: list[Target], sources: list[str], skipped: list) -> str:
+    multi_py = len({t.python for t in targets}) > 1
+    gaps = [r for r in rows if not r.ok]
+    return json.dumps(
+        {
+            "version": __version__,
+            "sources": sources,
+            "targets": [{"label": t.label(multi_py), "python": t.python, "platform": t.platform} for t in targets],
+            "packages": [
+                {
+                    "name": r.package.name,
+                    "version": r.package.version,
+                    "error": r.package.error,
+                    "results": {t.label(multi_py): r.results[t].value for t in targets},
+                }
+                for r in rows
+            ],
+            "skipped": [{"name": p.name, "reason": p.skip} for p in skipped],
+            "summary": {"packages": len(rows), "with_gaps": len(gaps)},
+        },
+        indent=2,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        # Don't crash printing ✓ to a non-UTF-8 pipe (e.g. Windows cp1252).
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            reconfigure(errors="replace")
+    args = parse_args(argv)
+    if args.list_targets:
+        for name, (family, arch) in PLATFORMS.items():
+            print(f"{name:<14} {family} {arch}")
+        return 0
+
+    try:
+        targets = build_targets(args.python or [running_python()], args.target, args.glibc, args.musl, args.macos)
+        sources = load_inputs(args.inputs or ["."])
+    except (TargetError, SourceError, OSError) as e:
+        print(f"wheelgap: error: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:  # malformed TOML and friends
+        print(f"wheelgap: error: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+
+    packages = [p for s in sources for p in s.packages]
+    fill_all(packages, refresh=args.online)
+    skipped = [p for p in packages if p.skip]
+    rows = [r for r in check(sources, targets) if r.needed]
+    rows.sort(key=lambda r: r.package.key)
+    gaps = [r for r in rows if not r.ok]
+    source_labels = [s.label for s in sources]
+
+    if args.json:
+        print(report_json(rows, targets, source_labels, skipped))
+        return 0 if args.exit_zero or not gaps else 1
+
+    style = Style(use_color(args.color))
+    pys = ", ".join(dict.fromkeys(t.python for t in targets))
+    print(style.dim(f"wheelgap {__version__} · {' + '.join(source_labels)} · {len(rows)} packages · Python {pys}"))
+    print()
+
+    shown = rows if args.all else gaps
+    if shown:
+        for ln in render_table(shown, targets, style):
+            print(ln)
+        print()
+        hidden = len(rows) - len(shown)
+        if hidden:
+            noun = "package" if hidden == 1 else "packages"
+            print(style.dim(f"{hidden} {noun} with wheels for every target hidden (--all to show)"))
+
+    if skipped:
+        names = ", ".join(f"{p.name} ({p.skip})" for p in skipped)
+        print(style.dim(f"skipped {len(skipped)} non-index package{'s' * (len(skipped) != 1)}: {names}"))
+
+    errors = [r for r in rows if r.package.error]
+    for r in errors:
+        print(style.dim(f"could not check {r.package.name}: {r.package.error}"))
+
+    n_t = len(targets)
+    if not gaps:
+        what = "The 1 package has" if len(rows) == 1 else f"All {len(rows)} packages have"
+        print(style.green(f"✓ {what} a wheel for {'every one of ' if n_t > 1 else ''}{n_t} target{'s' * (n_t > 1)}."))
+        return 0
+
+    source = sum(any(s is Status.SOURCE for s in r.results.values()) for r in gaps)
+    missing = sum(any(s is Status.MISSING for s in r.results.values()) for r in gaps)
+    parts = []
+    if source:
+        parts.append(style.yellow(f"{source} will build from source"))
+    if missing:
+        parts.append(style.red(f"{missing} can't install at all"))
+    unknown = len(gaps) - source - missing
+    if unknown > 0:
+        parts.append(style.dim(f"{unknown} unknown"))
+    verb = "has" if len(gaps) == 1 else "have"
+    print(f"{style.bold(f'{len(gaps)} of {len(rows)} packages')} {verb} gaps: " + ", ".join(parts) + ".")
+    return 0 if args.exit_zero else 1
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

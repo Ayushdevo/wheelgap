@@ -1,0 +1,49 @@
+[project]
+name = "wheelgap"
+version = "0.1.0"
+description = "Find the Python dependencies that have no prebuilt wheel for your target platform, before your Docker build does."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Patrick Ballard" }]
+requires-python = ">=3.11"
+dependencies = ["packaging>=24.2"]
+keywords = ["wheels", "packaging", "pypi", "uv", "lockfile", "docker", "alpine", "musllinux", "free-threading", "arm64"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: System :: Software Distribution",
+]
+
+[project.urls]
+Homepage = "https://github.com/patrickballard/wheelgap"
+Issues = "https://github.com/patrickballard/wheelgap/issues"
+Changelog = "https://github.com/patrickballard/wheelgap/blob/main/CHANGELOG.md"
+
+[project.scripts]
+wheelgap = "wheelgap.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.8"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
