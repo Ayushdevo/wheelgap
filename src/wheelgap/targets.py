@@ -151,7 +151,7 @@ PYODIDE_PLATFORMS: dict[tuple[int, int], list[str]] = {
     (3, 14): ["pyemscripten_2026_0_wasm32"],
 }
 
-_PY_RE = re.compile(r"^(?:cp|py)?(\d)\.?(\d{1,2})(t?)$")
+_PY_RE = re.compile(r"^(?:cp|py)?(\d)\.?(\d{1,2})(t?)$", re.ASCII)  # \d is ASCII only: int() would take ٣
 
 
 class TargetError(ValueError):

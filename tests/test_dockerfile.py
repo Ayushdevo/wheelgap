@@ -316,6 +316,13 @@ def test_escape_directive_rules(tmp_path):
         ("FROM python:3.12\nFROM\u00a0python:3.13\n", "unknown instruction"),  # mustn't fall back to 3.12
         ("FROM python:3.12\x85FROM python:3.13\n", "expected 'IMAGE' or 'IMAGE AS NAME'"),
         ("FROM python:3.12\rFROM python:3.13", "expected 'IMAGE' or 'IMAGE AS NAME'"),
+        ("FROM PYTHON:3.13\n", "repository name must be lowercase"),  # Docker rejects it, doesn't lowercase it
+        ("FROM docker.io/library/PYTHON:3.13\n", "repository name must be lowercase"),
+        ("FROM Docker.IO/library/python:3.12\n", "only the official python images"),  # host kept as written
+        ("FROM python:3.13-SLIM\n", "unknown image variant 'SLIM'"),  # Docker Hub tags are case-sensitive
+        ("FROM python:3.13-alpine3.1\u0662\n", "invalid tag"),
+        ("FROM ghcr.io/astral-sh/uv:0.\u0665-python3.13-alpine\n", "invalid tag"),
+        ("FROM python:3.1٣\n", "invalid tag"),  # an Arabic-Indic digit isn't allowed in a Docker tag
     ],
 )
 def test_dockerfiles_docker_rejects(tmp_path, text, message):

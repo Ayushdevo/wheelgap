@@ -171,7 +171,7 @@ def find_pyproject(inputs: list[str]) -> Path | None:
 
 PYTHON_VERSION_FILE = ".python-version"
 # uv and pyenv write "3.13", "3.13.1" or "3.14t"; anything else (system, pypy@3.10) is skipped.
-PYTHON_VERSION_LINE = re.compile(r"3\.(\d+)(?:\.\d+)?(t?)")
+PYTHON_VERSION_LINE = re.compile(r"3\.(\d+)(?:\.\d+)?(t?)", re.ASCII)
 
 
 def read_python_version(folder: Path) -> list[str]:

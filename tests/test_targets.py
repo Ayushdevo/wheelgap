@@ -37,6 +37,14 @@ def test_parse_python_rejects_garbage():
         parse_python("latest")
 
 
+def test_parse_python_rejects_non_ascii_digits():
+    # int("٣") is 3, so a Unicode \d match would quietly turn -p 3.1٣ into 3.13.
+    with pytest.raises(TargetError):
+        parse_python("3.1٣")
+    with pytest.raises(TargetError, match="can't parse Python version"):
+        build_targets(["3.1٣"], [])
+
+
 @pytest.mark.parametrize(
     "alias,expected",
     [

@@ -9,7 +9,7 @@ from pathlib import Path
 # Debian release in the image tag -> its glibc version.
 DEBIAN_GLIBC = {"bullseye": "2.31", "bookworm": "2.36", "trixie": "2.41"}
 ALPINE_MUSL = "1.2"  # Alpine 3.13 and later; 3.12 and earlier ship musl 1.1
-_ALPINE_RE = re.compile(r"^alpine(\d+)\.(\d+)")
+_ALPINE_RE = re.compile(r"^alpine(\d+)\.(\d+)", re.ASCII)
 # docker --platform -> wheelgap arch
 ARCHES = {
     "linux/amd64": "x86_64",
@@ -28,8 +28,9 @@ IMAGE_NAMES = ("python", "library/python", "docker.io/library/python", "docker.i
 UV_IMAGE = "ghcr.io/astral-sh/uv"
 UV_ARCHES = {"x86_64", "aarch64"}
 
-_TAG_RE = re.compile(r"^(\d+)\.(\d+)(?:\.\d+)?(?:(?:a|b|rc)\d+)?(?:-(.+))?$")
-_UV_TAG_PREFIX_RE = re.compile(r"^(?:\d+\.\d+(?:\.\d+)?-)?python")
+_TAG_RE = re.compile(r"^(\d+)\.(\d+)(?:\.\d+)?(?:(?:a|b|rc)\d+)?(?:-(.+))?$", re.ASCII)
+_UV_TAG_PREFIX_RE = re.compile(r"^(?:\d+\.\d+(?:\.\d+)?-)?python", re.ASCII)
+_DOCKER_TAG_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")  # distribution/reference's tag grammar
 
 
 class DockerfileError(ValueError):
@@ -222,7 +223,15 @@ def parse_image(image: str, platform: str | None = None) -> ImageTarget:
         raise DockerfileError(f"{image}: build arguments are not supported, pass -p/-t instead")
     image = image.split("@", 1)[0]
     name, _, tag = image.rpartition(":") if ":" in image.rsplit("/", 1)[-1] else (image, "", "")
-    name = name.lower()
+    # Docker requires a lowercase repository path. A registry host (the first part, if it has a dot or colon,
+    # is localhost, or has capitals: splitDockerDomain) is kept exactly as written, so `Docker.IO` isn't Docker Hub.
+    first, slash, path = name.partition("/")
+    if not (slash and (any(c in first for c in ".:") or first == "localhost" or first != first.lower())):
+        path = name
+    if path != path.lower():
+        raise DockerfileError(f"{image}: repository name must be lowercase, as Docker requires")
+    if tag and not _DOCKER_TAG_RE.fullmatch(tag):
+        raise DockerfileError(f"{image}: invalid tag {tag!r} (Docker allows only ASCII letters, digits, '_', '.', '-')")
     if name not in IMAGE_NAMES and name != UV_IMAGE:
         raise DockerfileError(
             f"{image}: only the official python images and Python-tagged Astral uv images are supported, "
@@ -237,7 +246,7 @@ def parse_image(image: str, platform: str | None = None) -> ImageTarget:
             raise DockerfileError(f"{image}: the tag must specify a Python version like python3.13-alpine")
         raise DockerfileError(f"{image}: the tag must start with a Python version like 3.13")
     python = f"{m.group(1)}.{m.group(2)}"
-    variant = (m.group(3) or "").lower().split("-") if m.group(3) else []
+    variant = m.group(3).split("-") if m.group(3) else []  # Docker Hub tags are case-sensitive: -SLIM doesn't exist
 
     if alpine := next((part for part in variant if part.startswith("alpine")), None):
         family, glibc, musl = "musl", None, ALPINE_MUSL
