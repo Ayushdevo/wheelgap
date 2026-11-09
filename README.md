@@ -104,7 +104,7 @@ If you think wheelgap got a package wrong, that output (or `--json --explain`) i
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: patrickballard/wheelgap@v0.1.1
+- uses: patrickballard/wheelgap@v0.2.0
   with:
     args: uv.lock -p 3.13 -t linux-x86_64,linux-aarch64
 ```
