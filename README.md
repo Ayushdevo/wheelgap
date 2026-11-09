@@ -4,6 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/wheelgap)](https://pypi.org/project/wheelgap/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+[![good first issues](https://img.shields.io/github/issues/patrickballard/wheelgap/good%20first%20issue?label=good%20first%20issues&color=7057ff)](https://github.com/patrickballard/wheelgap/labels/good%20first%20issue)
 
 **Find the Python dependencies that have no prebuilt wheel for your target platform, before your Docker build does.**
 
@@ -148,7 +149,7 @@ Sites like [pyreadiness.org](https://pyreadiness.org) and [free-threaded wheels]
 - [x] Infer the target from a `Dockerfile` (`FROM python:3.13-alpine`, `--platform=linux/arm64`)
 - [ ] "Closest version with a wheel" hints (e.g. upgrade `foo` 1.2 → 1.4 to get `musllinux` wheels)
 
-Contributions welcome. Issues labelled [good first issue](https://github.com/patrickballard/wheelgap/labels/good%20first%20issue) are a good start, and [CONTRIBUTING.md](CONTRIBUTING.md) has the 3-command dev setup.
+Contributions welcome. Issues labelled [good first issue](https://github.com/patrickballard/wheelgap/labels/good%20first%20issue) are a good start, and [CONTRIBUTING.md](CONTRIBUTING.md) has the 3-command dev setup. Questions are welcome in [Discussions](https://github.com/patrickballard/wheelgap/discussions).
 
 ## License
 
