@@ -1,10 +1,10 @@
 # wheelgap
 
-[![CI](https://github.com/patrickballard/wheelgap/actions/workflows/ci.yml/badge.svg)](https://github.com/patrickballard/wheelgap/actions/workflows/ci.yml)
+[![CI](https://github.com/wheelgap/wheelgap/actions/workflows/ci.yml/badge.svg)](https://github.com/wheelgap/wheelgap/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/wheelgap)](https://pypi.org/project/wheelgap/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
-[![good first issues](https://img.shields.io/github/issues/patrickballard/wheelgap/good%20first%20issue?label=good%20first%20issues&color=7057ff)](https://github.com/patrickballard/wheelgap/labels/good%20first%20issue)
+[![good first issues](https://img.shields.io/github/issues/wheelgap/wheelgap/good%20first%20issue?label=good%20first%20issues&color=7057ff)](https://github.com/wheelgap/wheelgap/labels/good%20first%20issue)
 
 **Find the Python dependencies that have no prebuilt wheel for your target platform, before your Docker build does.**
 
@@ -136,7 +136,7 @@ Docker platform names also work with `-t`, for example `-t linux/amd64,linux/arm
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: patrickballard/wheelgap@v0.4.0
+- uses: wheelgap/wheelgap@v0.4.0
   with:
     args: uv.lock -p 3.13 -t linux-x86_64,linux-aarch64
 ```
@@ -147,7 +147,7 @@ The job fails when a dependency would build from source on a target you ship, fo
 
 ```yaml
 repos:
-  - repo: https://github.com/patrickballard/wheelgap
+  - repo: https://github.com/wheelgap/wheelgap
     rev: v0.4.0
     hooks:
       - id: wheelgap
@@ -179,7 +179,7 @@ for r in wheelgap.check_lockfile("uv.lock", targets):  # markers and the uv grap
 python -m wheelgap.scan --top 5000 --out coverage.json
 ```
 
-This checks the latest release of the most-downloaded packages (from [top-pypi-packages](https://hugovk.dev/top-pypi-packages/)) against every platform, for Python 3.13, 3.14 and 3.14t by default, and writes one JSON file with per-platform totals. It's the data behind the [coverage tracker on the roadmap](https://github.com/patrickballard/wheelgap/discussions/43).
+This checks the latest release of the most-downloaded packages (from [top-pypi-packages](https://hugovk.dev/top-pypi-packages/)) against every platform, for Python 3.13, 3.14 and 3.14t by default, and writes one JSON file with per-platform totals. It's the data behind the [coverage tracker on the roadmap](https://github.com/wheelgap/wheelgap/discussions/43).
 
 ## How it works
 
@@ -201,15 +201,15 @@ Sites like [pyreadiness.org](https://pyreadiness.org) and [free-threaded wheels]
 
 ## Roadmap
 
-wheelgap is growing into **caniuse for Python wheels**: an open map of which packages have wheels for which platforms. The CLI stays focused, and around it come a nightly tracker of the most-used PyPI packages, a community knowledge base of workarounds, and campaigns to help upstream projects ship missing wheels. **[Read the roadmap and join the discussion →](https://github.com/patrickballard/wheelgap/discussions/43)**
+wheelgap is growing into **caniuse for Python wheels**: an open map of which packages have wheels for which platforms. The CLI stays focused, and around it come a nightly tracker of the most-used PyPI packages, a community knowledge base of workarounds, and campaigns to help upstream projects ship missing wheels. **[Read the roadmap and join the discussion →](https://github.com/wheelgap/wheelgap/discussions/43)**
 
 Next up for the CLI: iOS and Android targets (#11), private indexes (#19), and "nearest version with a wheel" hints (#20).
 
-Contributions welcome. Issues labelled [good first issue](https://github.com/patrickballard/wheelgap/labels/good%20first%20issue) are a good start, and [CONTRIBUTING.md](CONTRIBUTING.md) has the 3-command dev setup. Questions are welcome in [Discussions](https://github.com/patrickballard/wheelgap/discussions).
+Contributions welcome. Issues labelled [good first issue](https://github.com/wheelgap/wheelgap/labels/good%20first%20issue) are a good start, and [CONTRIBUTING.md](CONTRIBUTING.md) has the 3-command dev setup. Questions are welcome in [Discussions](https://github.com/wheelgap/wheelgap/discussions).
 
 ## Maintainer
 
-wheelgap is created and maintained by [@patrickballard](https://github.com/patrickballard), with help from [its contributors](https://github.com/patrickballard/wheelgap/graphs/contributors).
+wheelgap is created and maintained by [@patrickballard](https://github.com/patrickballard), with help from [its contributors](https://github.com/wheelgap/wheelgap/graphs/contributors).
 
 ## License
 

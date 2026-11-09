@@ -24,9 +24,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/patrickballard/wheelgap"
-Issues = "https://github.com/patrickballard/wheelgap/issues"
-Changelog = "https://github.com/patrickballard/wheelgap/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/wheelgap/wheelgap"
+Issues = "https://github.com/wheelgap/wheelgap/issues"
+Changelog = "https://github.com/wheelgap/wheelgap/blob/main/CHANGELOG.md"
 
 [project.scripts]
 wheelgap = "wheelgap.cli:main"

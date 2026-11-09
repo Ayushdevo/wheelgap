@@ -9,7 +9,7 @@ wheelgap is maintained by [@patrickballard](https://github.com/patrickballard), 
 You need [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/patrickballard/wheelgap && cd wheelgap
+git clone https://github.com/wheelgap/wheelgap && cd wheelgap
 uv run --group dev pytest        # tests
 uv run --group dev ruff check .  # lint
 uv run wheelgap numpy -t all     # try it
@@ -17,10 +17,10 @@ uv run wheelgap numpy -t all     # try it
 
 ## Picking something to work on
 
-- Issues labelled [`good first issue`](https://github.com/patrickballard/wheelgap/labels/good%20first%20issue) are scoped to be doable in an evening, and each one says which files to touch and what to test. [`help wanted`](https://github.com/patrickballard/wheelgap/labels/help%20wanted) issues are bigger.
+- Issues labelled [`good first issue`](https://github.com/wheelgap/wheelgap/labels/good%20first%20issue) are scoped to be doable in an evening, and each one says which files to touch and what to test. [`help wanted`](https://github.com/wheelgap/wheelgap/labels/help%20wanted) issues are bigger.
 - **Claim it** by commenting "I'd like to take this" on the issue, then go ahead. You don't need to wait for a reply.
 - If there's no PR after about two weeks, the issue is free for someone else. Life happens, and that's fine; just comment if you're still on it.
-- **Want to add something that isn't an issue yet?** Post it in [Discussions → Ideas](https://github.com/patrickballard/wheelgap/discussions/categories/ideas) first, so we can agree it fits before you spend time on it. Small fixes (typos, docs, obvious bugs) can go straight to a PR.
+- **Want to add something that isn't an issue yet?** Post it in [Discussions → Ideas](https://github.com/wheelgap/wheelgap/discussions/categories/ideas) first, so we can agree it fits before you spend time on it. Small fixes (typos, docs, obvious bugs) can go straight to a PR.
 
 ## Making a pull request
 
@@ -53,10 +53,10 @@ Using AI tools is fine. Please make sure you've run the code and the tests yours
 
 ## Reporting a wrong result
 
-Found a package that wheelgap misjudges? Open a [bug report](https://github.com/patrickballard/wheelgap/issues/new?template=bug_report.yml) with the output of the same command plus `--explain`. It lists the wheel filenames and why each was rejected, which is everything needed to write a test, so you don't have to share your lockfile.
+Found a package that wheelgap misjudges? Open a [bug report](https://github.com/wheelgap/wheelgap/issues/new?template=bug_report.yml) with the output of the same command plus `--explain`. It lists the wheel filenames and why each was rejected, which is everything needed to write a test, so you don't have to share your lockfile.
 
 ## Questions
 
-Ask in [Discussions → Q&A](https://github.com/patrickballard/wheelgap/discussions/categories/q-a). No question is too basic.
+Ask in [Discussions → Q&A](https://github.com/wheelgap/wheelgap/discussions/categories/q-a). No question is too basic.
 
 Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).

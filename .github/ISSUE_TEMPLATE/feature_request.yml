@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Bigger or open-ended ideas are easier to talk through in [Discussions → Ideas](https://github.com/patrickballard/wheelgap/discussions/categories/ideas) first. wheelgap does one job (checking dependencies for missing wheels), so ideas that keep it focused are the most likely to land.
+        Bigger or open-ended ideas are easier to talk through in [Discussions → Ideas](https://github.com/wheelgap/wheelgap/discussions/categories/ideas) first. wheelgap does one job (checking dependencies for missing wheels), so ideas that keep it focused are the most likely to land.
   - type: textarea
     id: problem
     attributes:
