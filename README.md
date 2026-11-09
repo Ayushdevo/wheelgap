@@ -166,11 +166,9 @@ Sites like [pyreadiness.org](https://pyreadiness.org) and [free-threaded wheels]
 
 ## Roadmap
 
-- [ ] Pyodide/WebAssembly, iOS and Android targets
-- [x] Read targets from `[tool.wheelgap]` in `pyproject.toml`
-- [ ] Private indexes (`--index-url`, the simple API)
-- [x] Infer the target from a `Dockerfile` (`FROM python:3.13-alpine`, `--platform=linux/arm64`)
-- [ ] "Closest version with a wheel" hints (e.g. upgrade `foo` 1.2 → 1.4 to get `musllinux` wheels)
+wheelgap is growing into **caniuse for Python wheels**: an open map of which packages have wheels for which platforms. The CLI stays focused, and around it come a nightly tracker of the most-used PyPI packages, a community knowledge base of workarounds, and campaigns to help upstream projects ship missing wheels. **[Read the roadmap and join the discussion →](https://github.com/patrickballard/wheelgap/discussions/43)**
+
+Next up for the CLI: iOS and Android targets (#11), private indexes (#19), and "nearest version with a wheel" hints (#20).
 
 Contributions welcome. Issues labelled [good first issue](https://github.com/patrickballard/wheelgap/labels/good%20first%20issue) are a good start, and [CONTRIBUTING.md](CONTRIBUTING.md) has the 3-command dev setup. Questions are welcome in [Discussions](https://github.com/patrickballard/wheelgap/discussions).
 
