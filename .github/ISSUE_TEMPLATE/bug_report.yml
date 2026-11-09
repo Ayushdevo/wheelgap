@@ -1,0 +1,44 @@
+name: Bug report
+description: wheelgap gave a wrong result, crashed, or misread a file.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The `--explain` output below is usually all we need to reproduce a wrong result, so you don't need to share your lockfile.
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran.
+      placeholder: wheelgap uv.lock -p 3.13 -t musl-aarch64
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output with --explain
+      description: Run the same command with `--explain` added and paste the output. For a crash, paste the full error.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: For example, "numpy 2.3.4 has a musllinux_1_2_aarch64 wheel on PyPI, so it should be ✓".
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: wheelgap version
+      description: Output of `wheelgap -V`.
+      placeholder: wheelgap 0.2.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS and Python you ran it on
+      placeholder: macOS 15, Python 3.13

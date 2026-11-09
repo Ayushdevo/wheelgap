@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a new target, input format or option.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Bigger or open-ended ideas are easier to talk through in [Discussions → Ideas](https://github.com/patrickballard/wheelgap/discussions/categories/ideas) first. wheelgap does one job (checking dependencies for missing wheels), so ideas that keep it focused are the most likely to land.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: What were you trying to do when you missed this?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like wheelgap to do?
+      description: An example command and the output you'd hope for helps a lot.
+    validations:
+      required: true
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to work on it?
+      options:
+        - "Yes, I'd like to open a PR"
+        - Maybe, with some pointers
+        - "No, just suggesting"
