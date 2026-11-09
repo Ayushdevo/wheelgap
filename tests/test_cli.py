@@ -786,3 +786,57 @@ def test_no_ignore_keeps_gaps(capsys, fixtures, output):
         assert "1 of 2 packages has gaps" in out
         assert "newglibc" in out
         assert "ignored" not in out.lower()
+
+
+@pytest.mark.parametrize("output", ["--json", "--markdown", "--color=never", "--quiet"])
+def test_ignore_config_matches_cli(capsys, fixtures, tmp_path, output):
+    (tmp_path / "uv.lock").write_bytes((fixtures / "armgap" / "uv.lock").read_bytes())
+    args = (str(tmp_path), "-p", "3.13", "-t", "linux-aarch64", output)
+    expected = run(capsys, *args, "--ignore", "NewGlibc")
+    (tmp_path / "pyproject.toml").write_text('[tool.wheelgap]\nignore = ["NewGlibc"]\n')
+    actual = run(capsys, *args)
+    assert actual == expected
+    assert actual[0] == 0 and not actual[2]
+    assert "newglibc" in actual[1]
+
+
+@pytest.mark.parametrize("value", ['["NewGlibc, ArmLib", "NEWGLIBC"]', '"NewGlibc, ArmLib"'])
+def test_ignore_config_accepts_list_or_string(capsys, fixtures, tmp_path, value):
+    (tmp_path / "uv.lock").write_bytes((fixtures / "armgap" / "uv.lock").read_bytes())
+    (tmp_path / "pyproject.toml").write_text(f"[tool.wheelgap]\nignore = {value}\n")
+    code, out, err = run(capsys, str(tmp_path), "-p", "3.13", "-t", "musl-aarch64", "--json")
+    assert code == 0 and not err
+    data = json.loads(out)
+    assert data["ignored"] == ["armlib", "newglibc"]
+    assert data["packages"] == []
+    assert data["summary"] == {"packages": 0, "with_gaps": 0}
+
+
+@pytest.mark.parametrize("override, ignored, total", [("ArmLib", ["armlib"], 1), ("", [], 2)])
+def test_ignore_cli_replaces_config(capsys, fixtures, tmp_path, override, ignored, total):
+    (tmp_path / "uv.lock").write_bytes((fixtures / "armgap" / "uv.lock").read_bytes())
+    (tmp_path / "pyproject.toml").write_text('[tool.wheelgap]\nignore = ["NewGlibc"]\n')
+    code, out, err = run(capsys, str(tmp_path), "-p", "3.13", "-t", "linux-aarch64", "--ignore", override, "--json")
+    assert code == 1 and not err  # the configured newglibc ignore was replaced, not extended
+    data = json.loads(out)
+    assert data["ignored"] == ignored
+    assert data["summary"] == {"packages": total, "with_gaps": 1}
+    assert "newglibc" in [p["name"] for p in data["packages"]]
+
+
+def test_ignore_config_empty_list_keeps_gaps(capsys, fixtures, tmp_path):
+    (tmp_path / "uv.lock").write_bytes((fixtures / "armgap" / "uv.lock").read_bytes())
+    args = (str(tmp_path), "-p", "3.13", "-t", "linux-aarch64", "--json")
+    expected = run(capsys, *args)
+    (tmp_path / "pyproject.toml").write_text("[tool.wheelgap]\nignore = []\n")
+    assert run(capsys, *args) == expected
+    assert expected[0] == 1
+
+
+@pytest.mark.parametrize("value", ["true", "1", '["newglibc", 1]', '{name = "newglibc"}'])
+def test_ignore_config_rejects_invalid_types(capsys, fixtures, tmp_path, value):
+    (tmp_path / "uv.lock").write_bytes((fixtures / "armgap" / "uv.lock").read_bytes())
+    (tmp_path / "pyproject.toml").write_text(f"[tool.wheelgap]\nignore = {value}\n")
+    code, out, err = run(capsys, str(tmp_path), "-p", "3.13", "-t", "linux-aarch64")
+    assert code == 2 and not out
+    assert "[tool.wheelgap] ignore must be a list of strings" in err

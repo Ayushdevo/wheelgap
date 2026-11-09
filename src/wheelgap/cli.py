@@ -159,7 +159,7 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 FAIL_ON = ("source", "missing")
-LIST_KEYS = ("python", "targets")
+LIST_KEYS = ("python", "targets", "ignore")
 STR_KEYS = ("glibc", "musl", "macos", "ios", "android-api", "fail-on", "pyodide-lock")
 
 
@@ -637,7 +637,8 @@ def main(argv: list[str] | None = None) -> int:
     if pyodide_lock:
         apply_bundled(rows, targets, pyodide_lock)
     rows.sort(key=lambda r: r.package.key)
-    ignore = {canonicalize_name(name.strip()) for item in args.ignore for name in item.split(",") if name.strip()}
+    ignore_names = args.ignore or config.get("ignore", [])
+    ignore = {canonicalize_name(name.strip()) for item in ignore_names for name in item.split(",") if name.strip()}
     # One entry per package, named as its first input writes it (PyYAML, not pyyaml).
     first_names = {r.package.key: r.package.name for r in reversed(rows) if r.package.key in ignore}
     ignored = sorted(first_names.values(), key=str.lower)

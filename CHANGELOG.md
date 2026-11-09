@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Set `ignore = ["psycopg2"]` in `[tool.wheelgap]` to ignore accepted gaps by default. Command-line `--ignore` flags replace this list. (#122, thanks [@moelomda](https://github.com/moelomda))
 - `--ignore NAME` accepts known package gaps without failing CI, and lists ignored packages in text, JSON and Markdown reports. Repeat the flag or separate names with commas. (#119, thanks [@moelomda](https://github.com/moelomda))
 
 ## 0.6.3 (2026-11-09)
