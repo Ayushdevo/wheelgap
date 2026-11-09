@@ -29,7 +29,72 @@ def test_uv_lock_graph(fixtures):
     assert got["oldpy"] == ["n/a", "n/a", "n/a"]  # only on Python < 3.13
     assert got["devtool"] == ["wheel", "wheel", "wheel"]  # dev group is included
     assert got["orphan"] == ["n/a", "n/a", "n/a"]  # nothing depends on it
+    assert got["nativeext"] == ["source", "source", "source"]
     assert "gitdep" not in got and "demo" not in got
+
+
+def test_uv_lock_via(fixtures):
+    sources = load_inputs([str(fixtures / "uvproj")])
+    lin, musl, win = targets = build_targets(["3.13"], ["linux-x86_64", "musl-aarch64", "win-amd64"])
+    rows = {r.package.name: r for r in check(sources, targets)}
+    assert rows["nativeext"].via == {t: ["demo", "fastlib", "nativeext"] for t in targets}
+    assert rows["winonly"].via == {win: ["demo", "winonly"]}  # n/a targets get no path
+    assert rows["orphan"].via == {}
+
+
+def graph(edges, root_edges=(), root_groups=None, roots=(0,)):
+    """A uv.lock-style Source whose package names are the keys of `edges`, in order."""
+    names = list(edges)
+    packages = [Package(n, "1", files=[f"{n}-1.tar.gz"]) for n in names]
+    for i in roots:
+        packages[i].skip = "editable"
+    deps = {names.index(n): [(d, None, m) for d, m in out] for n, out in edges.items()}
+    return Source(
+        "uv.lock", packages, edges=deps, roots=list(roots), root_edges=list(root_edges), root_groups=root_groups or {}
+    )
+
+
+def via(src, targets, name):
+    return next(r for r in check([src], targets) if r.package.name == name).via
+
+
+def test_via_is_a_shortest_path():
+    # A depth-first walk pops `long` first and reaches `c` through long → x.
+    src = graph(
+        {
+            "root": [("short", None), ("long", None)],
+            "short": [("c", None)],
+            "long": [("x", None)],
+            "x": [("c", None)],
+            "c": [],
+        }
+    )
+    (t,) = build_targets(["3.13"], ["linux-x86_64"])
+    assert via(src, [t], "c") == {t: ["root", "short", "c"]}
+
+
+def test_via_differs_per_target():
+    win_only = "sys_platform == 'win32'"
+    src = graph(
+        {"root": [("w", win_only), ("l", None)], "w": [("c", None)], "l": [("x", None)], "x": [("c", None)], "c": []}
+    )
+    lin, win = build_targets(["3.13"], ["linux-x86_64", "win-amd64"])
+    assert via(src, [lin, win], "c") == {lin: ["root", "l", "x", "c"], win: ["root", "w", "c"]}
+
+
+def test_via_from_dependency_group():
+    src = graph(
+        {"root": [], "tool": [("dep", None)], "dep": []}, root_edges=[("tool", None, None)], root_groups={0: "dev"}
+    )
+    (t,) = build_targets(["3.13"], ["linux-x86_64"])
+    assert via(src, [t], "tool") == {t: ["(dev group)", "tool"]}
+    assert via(src, [t], "dep") == {t: ["(dev group)", "tool", "dep"]}
+
+
+def test_via_from_plain_requirement():
+    src = graph({"req": []}, root_edges=[("req", None, None)], roots=())
+    (t,) = build_targets(["3.13"], ["linux-x86_64"])
+    assert via(src, [t], "req") == {t: ["req"]}
 
 
 def test_uv_lock_graph_python_312(fixtures):
@@ -62,6 +127,7 @@ def test_markers_on_packages(fixtures):
     got = results(check(sources, targets))
     assert got["fastlib"] == ["wheel", "missing"]
     assert got["macpkg"] == ["n/a", "source"]
+    assert all(r.via == {} for r in check(sources, targets))  # no graph, no paths
 
 
 def test_bad_marker_counts_as_needed():

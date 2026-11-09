@@ -257,6 +257,9 @@ def render_explain(rows: list[Row], targets: list[Target], style: Style) -> list
             cell, color = CELL[r.results[t]]
             head = f"{r.package.name} {r.package.version or '?'} on {t.label(multi_py)}:"
             out.append(f"{style.bold(head)} {getattr(style, color)(cell)}")
+            path = r.via.get(t, [])
+            if len(path) >= 2:  # a lone name says nothing about why the package is there
+                out.append(f"  via: {' → '.join(path)}")
             rejected = explain(files, t)
             if not rejected:
                 out.append(style.dim("  no wheels published for this version"))
@@ -306,6 +309,8 @@ def report_json(
                 t.label(multi_py): [{"file": f, "reason": why} for f, why in explain(r.package.files or [], t)]
                 for t in gap_targets(r, targets)
             }
+            # Same targets as `rejected`, minus any without a path (inputs with no dependency graph).
+            out["via"] = {t.label(multi_py): r.via[t] for t in gap_targets(r, targets) if t in r.via}
         return out
 
     return json.dumps(

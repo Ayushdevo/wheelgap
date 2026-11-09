@@ -79,6 +79,7 @@ def test_json_without_explain_has_no_rejected(capsys, fixtures):
     main([str(fixtures / "armgap"), "-p", "3.13", "-t", "musl-aarch64", "--json"])
     data = json.loads(capsys.readouterr().out)
     assert all("rejected" not in p for p in data["packages"])
+    assert all("via" not in p for p in data["packages"])
 
 
 def test_explain_pyodide(capsys, fake_pypi):
@@ -89,3 +90,54 @@ def test_explain_pyodide(capsys, fake_pypi):
     assert rejection("x-1-cp314-cp314-pyemscripten_2026_0_wasm32.whl", target(plat="pyodide")) == (
         "pyemscripten_2026_0_wasm32 is for a different Pyodide ABI than Python 3.13"
     )
+
+
+def test_cli_explain_shows_via(capsys, fixtures):
+    main([str(fixtures / "uvproj"), "-p", "3.13", "-t", "linux-x86_64", "--explain", "--exit-zero"])
+    out = capsys.readouterr().out
+    assert "nativeext 0.3 on linux-x86_64: ● source\n  via: demo → fastlib → nativeext\n" in out
+
+
+def test_cli_explain_via_for_the_original_report(capsys, fixtures):
+    main([str(fixtures / "uvproj"), "-p", "3.12", "-t", "win-amd64", "--explain", "--exit-zero"])
+    out = capsys.readouterr().out
+    assert "winonly 311 on win-amd64: ✗ missing\n  via: demo → winonly\n" in out
+
+
+def test_cli_explain_no_via_without_a_graph(capsys, fixtures):
+    main([str(fixtures / "pylockproj"), "-p", "3.13", "-t", "macos-arm64", "--explain", "--exit-zero"])
+    out = capsys.readouterr().out
+    assert "macpkg 1.0 on macos-arm64: ● source" in out
+    assert "via:" not in out
+
+
+def test_json_explain_via(capsys, fixtures):
+    main([str(fixtures / "uvproj"), "-p", "3.12", "-t", "linux-x86_64,win-amd64", "--json", "--explain", "--exit-zero"])
+    data = json.loads(capsys.readouterr().out)
+    packages = {p["name"]: p for p in data["packages"]}
+    assert packages["nativeext"]["via"] == {
+        "linux-x86_64": ["demo", "fastlib", "nativeext"],
+        "win-amd64": ["demo", "fastlib", "nativeext"],
+    }
+    assert packages["winonly"]["via"] == {"win-amd64": ["demo", "winonly"]}  # only a gap on win-amd64
+    assert all(p["via"].keys() == p["rejected"].keys() for p in data["packages"])
+
+
+def test_json_explain_via_from_dependency_group(capsys, tmp_path):
+    (tmp_path / "uv.lock").write_text(
+        'version = 1\n\n[manifest.dependency-groups]\ndev = [{ name = "devonly" }]\n\n'
+        '[[package]]\nname = "devonly"\nversion = "1.0"\nsource = { registry = "https://pypi.org/simple" }\n'
+        'sdist = { url = "https://example.invalid/devonly-1.0.tar.gz", hash = "sha256:00", size = 1 }\n',
+        encoding="utf-8",
+    )
+    main([str(tmp_path), "-p", "3.13", "-t", "linux-x86_64", "--json", "--explain", "--exit-zero"])
+    (devonly,) = json.loads(capsys.readouterr().out)["packages"]
+    assert devonly["via"] == {"linux-x86_64": ["(dev group)", "devonly"]}  # same label as the text line
+
+
+def test_json_explain_no_via_without_a_graph(capsys, fixtures):
+    main([str(fixtures / "pylockproj"), "-p", "3.13", "-t", "macos-arm64", "--json", "--explain", "--exit-zero"])
+    data = json.loads(capsys.readouterr().out)
+    macpkg = next(p for p in data["packages"] if p["name"] == "macpkg")
+    assert macpkg["rejected"] == {"macos-arm64": []}
+    assert macpkg["via"] == {}  # no dependency graph, so no target has a path

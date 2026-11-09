@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -30,6 +31,8 @@ SDIST_SUFFIXES = (".tar.gz", ".zip", ".tar.bz2", ".tgz", ".tar.xz")
 class Row:
     package: Package
     results: dict[Target, Status] = field(default_factory=dict)
+    # uv.lock only: the shortest dependency path that installs this package on each target.
+    via: dict[Target, list[str]] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -180,8 +183,16 @@ def marker_holds(marker: str | None, target: Target) -> bool:
         return True
 
 
-def reachable(source: Source, target: Target) -> set[int]:
-    """Indexes of packages installed on `target`, walking the lockfile graph from its roots."""
+# How a package was reached: the index of the package that depends on it, the name of the
+# dependency group that lists it, or None for a root or a top-level requirement.
+Parent = int | str | None
+
+
+def reachable(source: Source, target: Target) -> dict[int, Parent]:
+    """Packages installed on `target`, each mapped to the parent it was first reached from.
+
+    The walk is breadth-first from the roots, so following the parents gives a shortest path.
+    """
     by_name: dict[str, list[int]] = {}
     for i, p in enumerate(source.packages):
         by_name.setdefault(p.key, []).append(i)
@@ -195,19 +206,33 @@ def reachable(source: Source, target: Target) -> set[int]:
             candidates = [i for i in candidates if source.packages[i].version == version] or candidates
         return candidates
 
-    seen = set(source.roots)
-    stack = list(source.roots)
-    for edge in source.root_edges:
-        stack.extend(follow(edge))
-    while stack:
-        i = stack.pop()
-        seen.add(i)
+    parents: dict[int, Parent] = dict.fromkeys(source.roots)
+    queue = deque(source.roots)
+    for k, edge in enumerate(source.root_edges):
+        for j in follow(edge):
+            if j not in parents:
+                parents[j] = source.root_groups.get(k)
+                queue.append(j)
+    while queue:
+        i = queue.popleft()
         for edge in (source.edges or {}).get(i, []):
             for j in follow(edge):
-                if j not in seen:
-                    seen.add(j)
-                    stack.append(j)
-    return seen
+                if j not in parents:
+                    parents[j] = i
+                    queue.append(j)
+    return parents
+
+
+def dependency_path(source: Source, parents: dict[int, Parent], i: int) -> list[str]:
+    """Names from where the walk started down to package `i`, e.g. ["(dev group)", "pytest"]."""
+    path = [source.packages[i].name]
+    parent = parents[i]
+    while isinstance(parent, int):
+        path.append(source.packages[parent].name)
+        parent = parents[parent]
+    if isinstance(parent, str):
+        path.append(f"({parent} group)")
+    return path[::-1]
 
 
 def applies(pkg: Package, target: Target) -> bool:
@@ -227,5 +252,7 @@ def check(sources: list[Source], targets: list[Target]) -> list[Row]:
             for t in targets:
                 needed = i in installed[t] if installed is not None else applies(pkg, t)
                 row.results[t] = status_for(files, t, wheels) if needed else Status.NOT_NEEDED
+                if needed and installed is not None:
+                    row.via[t] = dependency_path(source, installed[t], i)
             rows.append(row)
     return rows

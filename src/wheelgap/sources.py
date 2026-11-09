@@ -49,6 +49,8 @@ class Source:
     edges: dict[int, list[Edge]] | None = None
     roots: list[int] = field(default_factory=list)
     root_edges: list[Edge] = field(default_factory=list)
+    # Index into root_edges -> name of the dependency group it comes from, e.g. {0: "dev"}.
+    root_groups: dict[int, str] = field(default_factory=dict)
 
 
 def _filename(entry: dict) -> str | None:
@@ -93,8 +95,10 @@ def parse_uv_lock(path: Path) -> Source:
         edges[i] = _uv_edges(p)
         if kind in ("editable", "virtual", "directory") or pkg.key in members:
             source.roots.append(i)
-    for group in manifest.get("dependency-groups", {}).values():
-        source.root_edges.extend((d["name"], None, d.get("marker")) for d in group)
+    for name, group in manifest.get("dependency-groups", {}).items():
+        for d in group:
+            source.root_groups[len(source.root_edges)] = name
+            source.root_edges.append((d["name"], None, d.get("marker")))
     source.root_edges.extend((d["name"], None, d.get("marker")) for d in manifest.get("requirements", []))
     if not source.roots and not source.root_edges:
         source.edges = None  # no idea where the graph starts; treat every package as needed

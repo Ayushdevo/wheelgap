@@ -27,6 +27,17 @@ def test_uv_lock(fixtures):
     assert ("devtool", None, None) in src.edges[0]
 
 
+def test_uv_lock_dependency_group_names(tmp_path):
+    (tmp_path / "uv.lock").write_text(
+        'version = 1\n\n[manifest]\nrequirements = [{ name = "app" }]\n\n'
+        '[manifest.dependency-groups]\ndev = [{ name = "pytest" }]\ndocs = [{ name = "sphinx" }]\n',
+        encoding="utf-8",
+    )
+    (src,) = load_inputs([str(tmp_path)])
+    assert [name for name, _, _ in src.root_edges] == ["pytest", "sphinx", "app"]
+    assert src.root_groups == {0: "dev", 1: "docs"}  # the plain requirement has no group
+
+
 def test_poetry_lock(fixtures):
     (src,) = load_inputs([str(fixtures / "poetryproj" / "poetry.lock")])
     pkgs = by_name(src)
