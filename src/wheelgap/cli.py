@@ -19,7 +19,9 @@ from .pypi import check_index_url, fill_all
 from .sources import Package, SourceError, load_inputs
 from .targets import (
     ALIASES,
+    DEFAULT_ANDROID_API,
     DEFAULT_GLIBC,
+    DEFAULT_IOS,
     DEFAULT_MACOS,
     DEFAULT_MUSL,
     DEFAULT_PLATFORMS,
@@ -29,6 +31,8 @@ from .targets import (
     Target,
     TargetError,
     build_targets,
+    parse_api_level,
+    parse_ios_version,
     parse_version_pair,
     resolve_platform,
 )
@@ -91,12 +95,18 @@ def make_parser() -> argparse.ArgumentParser:
         metavar="PLATFORM",
         help=(
             "target platform (repeatable; 'all' for the 8 common ones, 'everything' adds armv7l, ppc64le, "
-            f"s390x and riscv64 Linux; default: {','.join(DEFAULT_PLATFORMS)})"
+            f"s390x and riscv64 Linux, 'mobile' is iOS and Android; default: {','.join(DEFAULT_PLATFORMS)})"
         ),
     )
     p.add_argument("--glibc", metavar="X.Y", help=f"glibc version for linux-* targets (default: {DEFAULT_GLIBC})")
     p.add_argument("--musl", metavar="X.Y", help=f"musl version for musl-* targets (default: {DEFAULT_MUSL})")
     p.add_argument("--macos", metavar="X.Y", help=f"minimum macOS for macos-* targets (default: {DEFAULT_MACOS})")
+    p.add_argument("--ios", metavar="X.Y", help=f"minimum iOS for ios-* targets (default: {DEFAULT_IOS})")
+    p.add_argument(
+        "--android-api",
+        metavar="N",
+        help=f"minimum Android API level for android-* targets (default: {DEFAULT_ANDROID_API})",
+    )
     p.add_argument(
         "--dockerfile",
         metavar="PATH",
@@ -139,7 +149,7 @@ def make_parser() -> argparse.ArgumentParser:
 
 FAIL_ON = ("source", "missing")
 LIST_KEYS = ("python", "targets")
-STR_KEYS = ("glibc", "musl", "macos", "fail-on", "pyodide-lock")
+STR_KEYS = ("glibc", "musl", "macos", "ios", "android-api", "fail-on", "pyodide-lock")
 
 
 def project_dir(inputs: list[str]) -> Path:
@@ -193,8 +203,18 @@ def load_config(path: Path) -> dict:
             if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
                 raise SourceError(f"{path}: [tool.wheelgap] {key} must be a list of strings")
         elif key in STR_KEYS:
+            if key == "android-api" and isinstance(value, int) and not isinstance(value, bool):
+                value = str(value)  # an API level is naturally written as a number
             if not isinstance(value, str):
-                raise SourceError(f'{path}: [tool.wheelgap] {key} must be a string like "2.31"')
+                example = {
+                    "android-api": 'an integer or a string like "24"',
+                    "ios": 'a string like "13.0"',
+                    "musl": 'a string like "1.2"',
+                    "macos": 'a string like "14.0"',
+                    "fail-on": 'a string like "missing"',
+                    "pyodide-lock": "a path or URL string",
+                }.get(key, 'a string like "2.31"')
+                raise SourceError(f"{path}: [tool.wheelgap] {key} must be {example}")
             if key == "fail-on" and value not in FAIL_ON:
                 raise SourceError(f"{path}: [tool.wheelgap] fail-on must be one of: {', '.join(FAIL_ON)}")
         elif key == "quiet":
@@ -374,8 +394,13 @@ def print_target_list(args: argparse.Namespace, config: dict) -> None:
     for family, (label, version) in versions.items():
         major, minor = parse_version_pair(version, label)
         limits[family] = f", {label} <= {major}.{minor}"
+    major, minor = parse_ios_version(args.ios or config.get("ios", DEFAULT_IOS))
+    limits["ios"] = f", iOS <= {major}.{minor}"
     pythons = ", ".join(f"{a}.{b}" for a, b in PYODIDE_PLATFORMS)
     limits["pyodide"] = f", Python {pythons} (not in -t all)"
+    limits["ios"] += " (wheels only; -t mobile, not in -t all)"
+    api = parse_api_level(args.android_api or config.get("android-api", DEFAULT_ANDROID_API))
+    limits["android"] = f", API level <= {api} (wheels only; -t mobile, not in -t all)"
 
     rows = [
         (name, aliases[name], f"{family} {arch}{limits.get(family, '')}{' (not in -t all)' * (arch in EXTRA_ARCHES)}")
@@ -540,6 +565,8 @@ def main(argv: list[str] | None = None) -> int:
             args.glibc or config.get("glibc", DEFAULT_GLIBC),
             args.musl or config.get("musl", DEFAULT_MUSL),
             args.macos or config.get("macos", DEFAULT_MACOS),
+            args.ios or config.get("ios", DEFAULT_IOS),
+            args.android_api or config.get("android-api", DEFAULT_ANDROID_API),
         )
         check_index_url()
         sources = load_inputs(args.inputs or ["."])
