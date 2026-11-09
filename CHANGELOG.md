@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Read custom package categories in `Pipfile.lock` (such as `[docs]` or `[tests]`), not just `default` and `develop`. (#59, thanks [@chiragjangiir](https://github.com/chiragjangiir))
+
 ## 0.6.0 (2026-11-09)
 
 New targets for phones and more Linux hardware, and a job summary for the GitHub Action.

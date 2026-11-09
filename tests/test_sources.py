@@ -193,6 +193,54 @@ def test_bad_requirement():
         load_inputs(["not a valid ! spec"])
 
 
+def test_pipfile_lock_custom_categories(tmp_path):
+    path = tmp_path / "Pipfile.lock"
+    lock = {
+        "docs": {
+            "sphinx": {"version": "==7.2.6"},
+            "furo": {"version": "==2024.1.29"},
+        },
+        "_meta": {"sources": []},
+        "default": {
+            "requests": {"version": "==2.31.0"},
+            "sphinx": {"version": "==7.2.6"},
+        },
+        "develop": {
+            "pytest": {"version": "==8.0.0"},
+        },
+        "tests": {
+            "pytest-cov": {"version": "==4.1.0"},
+        },
+    }
+    path.write_text(json.dumps(lock), encoding="utf-8")
+    (src,) = load_inputs([str(path)])
+    assert [(p.name, p.version) for p in src.packages] == [
+        ("requests", "2.31.0"),
+        ("sphinx", "7.2.6"),
+        ("pytest", "8.0.0"),
+        ("furo", "2024.1.29"),
+        ("pytest-cov", "4.1.0"),
+    ]
+    assert len(src.packages) == 5
+
+
+def test_pipfile_lock_malformed_package_entry_raises(tmp_path):
+    path = tmp_path / "Pipfile.lock"
+    lock = {"default": {"requests": "==2.31.0"}}
+    path.write_text(json.dumps(lock), encoding="utf-8")
+    with pytest.raises(SourceError, match="isn't a package entry"):
+        load_inputs([str(path)])
+
+
+@pytest.mark.parametrize("section", ["default", "develop", "docs"])
+@pytest.mark.parametrize("value", [None, [], "x"])
+def test_pipfile_lock_malformed_section_raises(tmp_path, section, value):
+    path = tmp_path / "Pipfile.lock"
+    path.write_text(json.dumps({"_meta": {}, section: value}), encoding="utf-8")
+    with pytest.raises(SourceError, match=f"{section} isn't a package section"):
+        load_inputs([str(path)])
+
+
 def test_pdm_lock_extras_variants_count_once(tmp_path):
     # PDM writes one entry per extras variant (seen in PDM's own lockfile for coverage[toml]).
     (tmp_path / "pdm.lock").write_text(
