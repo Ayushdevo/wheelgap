@@ -144,6 +144,7 @@ def parse_poetry_lock(path: Path) -> Source:
 def parse_pipfile_lock(path: Path) -> Source:
     data = json.loads(path.read_text(encoding="utf-8"))
     pkgs = []
+    seen: dict[tuple[str, str | None], Package] = {}
     for section in ("default", "develop"):
         for name, p in data.get(section, {}).items():
             version = p.get("version")
@@ -153,6 +154,14 @@ def parse_pipfile_lock(path: Path) -> Source:
             pkg.skip = next((kind for kind in ("git", "path", "file") if kind in p), None)
             if pkg.skip is None and p.get("editable"):
                 pkg.skip = "editable"
+            key = (canonicalize_name(name), pkg.version)
+            if key in seen:
+                # Pipenv lists a package used by both sections in both; keep one, needed if either entry is.
+                first = seen[key]
+                if first.markers is not None:
+                    first.markers = None if pkg.markers is None else first.markers + pkg.markers
+                continue
+            seen[key] = pkg
             pkgs.append(pkg)
     return Source(path.name, pkgs)
 

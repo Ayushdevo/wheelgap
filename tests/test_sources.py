@@ -85,6 +85,29 @@ def test_pipfile_lock_with_one_section(tmp_path, section):
     assert [(p.name, p.version) for p in src.packages] == [("purewheel", "3.1")]
 
 
+def test_pipfile_lock_package_in_both_sections(tmp_path):
+    path = tmp_path / "Pipfile.lock"
+    lock = {
+        "default": {
+            "certifi": {"version": "==2025.1.31"},
+            "colorama": {"version": "==0.4.6", "markers": "os_name == 'nt'"},
+        },
+        "develop": {
+            "Certifi": {"version": "==2025.1.31"},
+            "colorama": {"version": "==0.4.6", "markers": "sys_platform == 'win32'"},
+            "pytest": {"version": "==8.3.5"},
+        },
+    }
+    path.write_text(json.dumps(lock), encoding="utf-8")
+    (src,) = load_inputs([str(path)])
+    assert [(p.name, p.version) for p in src.packages] == [
+        ("certifi", "2025.1.31"),
+        ("colorama", "0.4.6"),
+        ("pytest", "8.3.5"),
+    ]
+    assert by_name(src)["colorama"].markers == ["os_name == 'nt'", "sys_platform == 'win32'"]
+
+
 def test_empty_pipfile_lock(tmp_path):
     path = tmp_path / "Pipfile.lock"
     path.write_text("{}", encoding="utf-8")

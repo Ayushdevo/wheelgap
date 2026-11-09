@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Support `Pipfile.lock` inputs, including default and development dependencies, environment markers, and skipped non-index packages.
+- Support `Pipfile.lock` inputs, including default and development dependencies, environment markers, and skipped non-index packages. Packages listed in both sections are checked once. (#30, thanks [@Swarneil1905](https://github.com/Swarneil1905))
 - Accept Docker platform names (`linux/amd64`, `linux/arm64`, `linux/arm64/v8`) with `-t`. (#28, thanks [@jwalith4418-Mj](https://github.com/jwalith4418-Mj))
 - New `--fail-on missing` (or `fail-on = "missing"` in `[tool.wheelgap]`): accept source builds and only fail when a package can't be installed at all. (#22)
 - pre-commit hook: add `id: wheelgap` from this repo to `.pre-commit-config.yaml`. (#23)
