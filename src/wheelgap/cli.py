@@ -579,7 +579,7 @@ def main(argv: list[str] | None = None) -> int:
         elif (lock_spec := config.get("pyodide-lock")) and any(PLATFORMS[t.platform][0] == "pyodide" for t in targets):
             # A project default: only read (or fetched) on runs that check a pyodide target, so it never
             # affects `wheelgap -t linux` in the same project. A relative path is relative to pyproject.toml.
-            if pyproject and not lock_spec.startswith(("http://", "https://")):
+            if pyproject and not lock_spec.lower().startswith(("http://", "https://")):
                 lock_spec = str(pyproject.parent / lock_spec)
             pyodide_lock = load_pyodide_lock(lock_spec)
             check_targets(pyodide_lock, targets)  # pyodide targets but none for this lock's Python: say so
