@@ -68,7 +68,7 @@ def test_last_from_takes_the_final_stage():
         "    python:3.13-alpine\n"
         "COPY --from=build /wheels /wheels\n"
     )
-    assert last_from(text) == "--platform=linux/arm64      python:3.13-alpine"
+    assert last_from(text) == "--platform=linux/arm64     python:3.13-alpine"  # joined as Docker joins
     assert parse_from(last_from(text)) == ImageTarget("3.13", "musl-aarch64", musl="1.2")
 
 
@@ -132,3 +132,162 @@ def test_cli_wheelgap_names_still_win_over_the_image(capsys, fixtures, tmp_path)
     dockerfile.write_text("FROM python:3.13-alpine\n")
     main([str(fixtures / "uvproj"), "--dockerfile", str(dockerfile), "-t", "linux-aarch64", "--json"])
     assert [t["platform"] for t in json.loads(capsys.readouterr().out)["targets"]] == ["linux-aarch64"]
+
+
+def _dockerfile(tmp_path, text):
+    path = tmp_path / "Dockerfile"
+    path.write_text(text)
+    return path
+
+
+def test_named_stage_is_followed(tmp_path):
+    text = "FROM python:3.13-alpine AS base\nRUN apk add --no-cache libpq\n\nFROM base AS runtime\nCOPY . /app\n"
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.13", "musl-x86_64", musl="1.2")
+
+
+def test_chain_of_stages_and_platforms(tmp_path):
+    text = (
+        "FROM --platform=linux/arm64 python:3.12-slim-bookworm AS base\n"
+        "FROM base AS deps\n"
+        "FROM python:3.11 AS unrelated\n"
+        "FROM deps\n"
+    )
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.12", "linux-aarch64", glibc="2.36")
+    # As in Docker, a stage keeps the platform of the stage it builds on; --platform here changes nothing.
+    text += "FROM --platform=linux/amd64 deps\n"
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.12", "linux-aarch64", glibc="2.36")
+    text = "FROM python:3.13-slim AS base\nFROM --platform=linux/arm64 base\n"
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.13", "linux-x86_64")
+
+
+def test_stage_names_are_lowercased_like_docker(tmp_path):
+    # Docker lowercases the AS name but looks a reference up as written (and image names are lowercase).
+    text = "FROM python:3.13 as Base\nFROM base\n"
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.13", "linux-x86_64")
+    with pytest.raises(DockerfileError, match="FROM BASE: not an earlier stage"):
+        read_dockerfile(_dockerfile(tmp_path, "FROM python:3.13 as Base\nFROM BASE\n"))
+
+
+def test_unknown_stage_is_a_clear_error(tmp_path):
+    text = "FROM python:3.13-alpine AS base\nFROM bse\n"
+    with pytest.raises(DockerfileError, match=r"FROM bse: not an earlier stage \(base\) or an official python image"):
+        read_dockerfile(_dockerfile(tmp_path, text))
+
+
+def test_scratch_after_stages_keeps_the_usual_error(tmp_path):
+    text = "FROM python:3.13-alpine AS build\nRUN pip wheel . -w /w\nFROM scratch\nCOPY --from=build /w /w\n"
+    with pytest.raises(DockerfileError, match="scratch: only the official python images"):
+        read_dockerfile(_dockerfile(tmp_path, text))
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "RUN echo $((1<<SHIFT))",
+        "RUN echo $((1 << BITS))",
+        'RUN python -c "print(1<<n)"',
+        "CMD cat <<EOF",
+        "ENV X=<<EOF",
+        'LABEL note="a<<b"',
+        'RUN ["sh", "-c", "cat <<EOF"]',
+        "RUN cat <<<word",
+    ],
+)
+def test_lines_with_heredoc_like_text_never_hide_the_final_from(tmp_path, line):
+    # wheelgap doesn't parse heredocs, so whatever these mean to Docker, the final FROM is still found.
+    text = f"FROM python:3.13-alpine AS base\n{line}\nFROM python:3.12-slim\n"
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.12", "linux-x86_64")
+
+
+def test_unknown_stage_lists_only_earlier_stages(tmp_path):
+    text = "FROM python:3.13-alpine AS base\nFROM bse AS final\n"
+    with pytest.raises(DockerfileError, match=r"not an earlier stage \(base\) or"):
+        read_dockerfile(_dockerfile(tmp_path, text))
+    # A stage built on a non-python image gets the usual image error, not a stage one.
+    with pytest.raises(DockerfileError, match="alpine: only the official python images"):
+        read_dockerfile(_dockerfile(tmp_path, "FROM alpine AS base\nFROM base\n"))
+
+
+def test_python_lines_starting_with_from_are_not_errors(tmp_path):
+    text = "FROM python:3.13 AS a\nRUN python - <<EOF\nfromtimestamp = 1\nEOF\nFROM python:3.12\n"
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.12", "linux-x86_64")
+
+
+def test_python_imports_in_heredocs_are_not_from_lines(tmp_path):
+    text = (
+        "FROM python:3.12-slim AS app\n"
+        "COPY . /app\n"
+        "FROM python:3.13-alpine\n"
+        "COPY --from=app /app /app\n"
+        "RUN python - <<EOF\n"
+        "from app import main\n"
+        "EOF\n"
+    )
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.13", "musl-x86_64", musl="1.2")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # A blank line inside a continued instruction is skipped, so FROM base is part of the RUN.
+        "FROM python:3.12-slim AS base\nFROM python:3.13-alpine\nRUN rm -rf /tmp/* \\\n\nFROM base\n",
+        # The same with a comment line in between.
+        "FROM python:3.12-slim AS base\nFROM python:3.13-alpine\nRUN rm -rf /tmp/* \\\n# note\nFROM base\n",
+        # With `# escape=` + "`", a trailing backtick continues the line (and a backslash doesn't).
+        "# escape=`\nFROM python:3.12-windowsservercore AS base\nFROM python:3.13-alpine\nRUN echo `\nFROM base\n",
+    ],
+)
+def test_continuations_like_docker(tmp_path, text):
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.13", "musl-x86_64", musl="1.2")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # A comment ending in a backslash doesn't continue onto the next line.
+        "FROM python:3.13-alpine AS app\n# path C:\\\nFROM python:3.12-slim\n",
+        # A doubled backslash is an escaped backslash, not a continuation.
+        "FROM python:3.13-alpine AS app\nRUN echo \\\\\nFROM python:3.12-slim\n",
+        # Under `# escape=` + "`", a trailing backslash is just a character.
+        "# escape=`\nFROM python:3.13-alpine AS app\nRUN dir C:\\\nFROM python:3.12-slim\n",
+    ],
+)
+def test_lines_that_do_not_continue(tmp_path, text):
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.12", "linux-x86_64")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "FROM python:3.12-alpine AS build\nFROM --platform=linux/arm64 \\\n    python:3.11-slim \\\n# end\n",
+        "FROM python:3.12-alpine AS build\nFROM --platform=linux/arm64 python:3.11-slim \\",
+        "\ufeffFROM --platform=linux/arm64 python:3.11-slim\n",  # a UTF-8 BOM, which Docker strips
+        "FROM --platform=linux/arm64 python:3.1\\\n1-slim\n",  # no space is added at the join
+    ],
+)
+def test_final_line_edge_cases(tmp_path, text):
+    path = tmp_path / "Dockerfile"
+    path.write_text(text, encoding="utf-8")
+    assert read_dockerfile(path) == ImageTarget("3.11", "linux-aarch64")
+
+
+def test_escape_directive_rules(tmp_path):
+    # An unknown directive-looking comment ends the directives, so the later escape= is ignored.
+    text = "# version=2\n# escape=`\nFROM python:3.12-alpine\nRUN echo \\\nFROM python:3.11-slim\n"
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.12", "musl-x86_64", musl="1.2")
+    with pytest.raises(DockerfileError, match="invalid escape directive"):
+        read_dockerfile(_dockerfile(tmp_path, "# escape=x\nFROM python:3.12\n"))
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("# escape=`\n# escape=\\\nFROM python:3.12\n", "only one escape parser directive"),
+        ("# syntax=docker/dockerfile:1\n# syntax=docker/dockerfile:1\nFROM python:3.12\n", "only one syntax"),
+        ("FROM python:3.12 AS a\nFROM\\\npython:3.11\n", "unknown instruction 'FROMpython:3.11'"),
+        ("FROM python:3.12 AS a\nFROM\n", "FROM with no image"),
+    ],
+)
+def test_dockerfiles_docker_rejects(tmp_path, text, message):
+    with pytest.raises(DockerfileError, match=message):
+        read_dockerfile(_dockerfile(tmp_path, text))

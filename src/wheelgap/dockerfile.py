@@ -1,4 +1,4 @@
-"""Turn the last FROM line of a Dockerfile into a wheelgap target."""
+"""Turn the final stage of a Dockerfile into a wheelgap target, following named stages back to an image."""
 
 from __future__ import annotations
 
@@ -44,21 +44,83 @@ class ImageTarget:
     musl: str | None = None
 
 
-def last_from(text: str) -> str:
-    """The arguments of the last FROM instruction, with line continuations joined."""
-    joined = re.sub(r"\\\r?\n", " ", text)
-    found = None
-    for line in joined.splitlines():
-        words = line.strip().split(None, 1)
-        if len(words) == 2 and words[0].upper() == "FROM":
-            found = words[1]
-    if found is None:
-        raise DockerfileError("no FROM line found")
+_DIRECTIVE_RE = re.compile(r"^#\s*([A-Za-z]+)\s*=\s*(.+?)\s*$")
+_DIRECTIVES = {"syntax", "escape", "check"}  # the parser directives BuildKit knows
+
+# A Python import, e.g. inside a `RUN <<EOF` heredoc: never a valid FROM instruction.
+_PY_IMPORT_RE = re.compile(r"^from\s+\S+\s+import\s")
+
+
+def _escape_char(lines: list[str]) -> str:
+    """The `# escape=` parser directive (\\ by default, ` on Windows images)."""
+    seen: set[str] = set()
+    escape = "\\"
+    for line in lines:
+        m = _DIRECTIVE_RE.match(line.strip())
+        if not m or m.group(1).lower() not in _DIRECTIVES:
+            break  # directives come first; any other line (even another comment) ends them
+        name = m.group(1).lower()
+        if name in seen:
+            raise DockerfileError(f"only one {name} parser directive can be used")
+        seen.add(name)
+        if name == "escape":
+            if m.group(2) not in ("`", "\\"):
+                raise DockerfileError(f"invalid escape directive {m.group(2)!r} (Docker accepts ` or \\)")
+            escape = m.group(2)
+    return escape
+
+
+def _from_lines(text: str) -> list[str]:
+    """The arguments of every FROM instruction in order, with line continuations joined as Docker joins them.
+
+    Python `from x import y` lines (from a heredoc) are skipped. Other heredoc contents aren't parsed,
+    so a line in one that looks exactly like a FROM instruction (say, SQL's `FROM base` naming a
+    stage) is still read as one: a known limit, pass -p/-t for such Dockerfiles.
+    """
+    lines = [raw.rstrip("\r") for raw in text.splitlines()]
+    esc = re.escape(_escape_char(lines))
+    continued = re.compile(rf"(?<!{esc}){esc}[ \t]*$")  # one escape char at the end, not two
+    found = []
+    parts: list[str] = []  # an instruction continued onto the next line
+
+    def finish(instruction: str, joined: bool) -> None:
+        words = instruction.split(None, 1)
+        if joined and words and words[0].upper().startswith("FROM") and words[0].upper() != "FROM":
+            raise DockerfileError(f"unknown instruction {words[0]!r} (a FROM joined to the next line?)")
+        if words and words[0].upper() == "FROM":
+            if len(words) == 1:
+                raise DockerfileError("FROM with no image")
+            if not _PY_IMPORT_RE.match(instruction):
+                found.append(words[1])
+
+    for line in lines:
+        stripped = line.strip()
+        if parts and (not stripped or stripped.startswith("#")):
+            continue  # Docker skips blank and comment lines inside a continued instruction
+        if not parts and stripped.startswith("#"):
+            continue  # a comment never continues, even if it ends in the escape char
+        if m := continued.search(line):
+            parts.append(line[: m.start()])
+            continue
+        finish(
+            "".join([*parts, line]).strip(), joined=bool(parts)
+        )  # Docker joins continued lines with nothing in between
+        parts = []
+    if parts:  # the file ended mid-continuation: Docker still reads what's there
+        finish("".join(parts).strip(), joined=len(parts) > 1)
     return found
 
 
-def parse_from(args: str) -> ImageTarget:
-    """Parse `[--platform=P] image[:tag][@digest] [AS name]`."""
+def last_from(text: str) -> str:
+    """The arguments of the last FROM instruction, with line continuations joined."""
+    found = _from_lines(text)
+    if not found:
+        raise DockerfileError("no FROM line found")
+    return found[-1]
+
+
+def _split_from(args: str) -> tuple[str, str | None, str | None]:
+    """`[--platform=P] image [AS name]` -> (image, platform, stage name)."""
     words = args.split()
     platform = None
     while words and words[0].startswith("--"):
@@ -69,7 +131,42 @@ def parse_from(args: str) -> ImageTarget:
             platform = words.pop(0)
     if not words:
         raise DockerfileError(f"FROM {args}: no image")
-    return parse_image(words[0], platform)
+    stage = words[2].lower() if len(words) >= 3 and words[1].upper() == "AS" else None
+    return words[0], platform, stage
+
+
+def parse_from(args: str) -> ImageTarget:
+    """Parse `[--platform=P] image[:tag][@digest] [AS name]`."""
+    image, platform, _ = _split_from(args)
+    return parse_image(image, platform)
+
+
+def final_image(text: str) -> tuple[str, str | None]:
+    """The image the last stage is built on, and its platform.
+
+    `FROM base AS runtime` builds on an earlier stage called `base`; that is followed back (through
+    any chain of stages) to a real image. Like Docker, a stage keeps the platform of the stage it
+    builds on: a `--platform` on `FROM base` doesn't change what `base` was built for.
+    """
+    stages: dict[str, tuple[str, str | None]] = {}
+    lines = _from_lines(text)
+    if not lines:
+        raise DockerfileError("no FROM line found")
+    for args in lines[:-1]:
+        image, platform, stage = _split_from(args)
+        if (base := stages.get(image)) is not None:  # AS names are lowercased, references aren't
+            image, platform = base
+        if stage:
+            stages[stage] = (image, platform)
+    image, platform, _ = _split_from(lines[-1])
+    if (base := stages.get(image)) is not None:
+        return base
+    if stages and not any(c in image for c in ":/@$") and image.lower() not in (*IMAGE_NAMES, "scratch"):
+        known = ", ".join(stages)
+        raise DockerfileError(
+            f"FROM {image}: not an earlier stage ({known}) or an official python image, pass -p/-t instead"
+        )
+    return image, platform
 
 
 def parse_image(image: str, platform: str | None = None) -> ImageTarget:
@@ -121,6 +218,6 @@ def parse_image(image: str, platform: str | None = None) -> ImageTarget:
 
 def read_dockerfile(path: Path) -> ImageTarget:
     try:
-        return parse_from(last_from(path.read_text(encoding="utf-8")))
+        return parse_image(*final_image(path.read_text(encoding="utf-8-sig")))
     except DockerfileError as e:
         raise DockerfileError(f"{path}: {e}") from None
