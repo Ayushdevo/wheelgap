@@ -443,7 +443,8 @@ def gap_summary(gaps: list[Row], total: int, style: Style) -> str:
     if unknown:
         parts.append(style.dim(f"{unknown} unknown"))
     verb = "has" if len(gaps) == 1 else "have"
-    return f"{style.bold(f'{len(gaps)} of {total} packages')} {verb} gaps: " + ", ".join(parts) + "."
+    noun = "package" if total == 1 else "packages"
+    return f"{style.bold(f'{len(gaps)} of {total} {noun}')} {verb} gaps: " + ", ".join(parts) + "."
 
 
 _MD_SPECIAL = re.compile(r"([\\`*_\[\]<>#|~&])")

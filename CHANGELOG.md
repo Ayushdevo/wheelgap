@@ -4,6 +4,7 @@
 
 - Read custom package categories in `Pipfile.lock` (such as `[docs]` or `[tests]`), not just `default` and `develop`. (#59, thanks [@chiragjangiir](https://github.com/chiragjangiir))
 - Read Rye and uv requirements lockfiles (`requirements.lock`, `requirements-dev.lock`), and the pre-commit hook runs when they change. (#61, thanks [@chiragjangiir](https://github.com/chiragjangiir))
+- The summary line says "1 of 1 package", not "1 of 1 packages". (#81, thanks [@HarshRajSinghania](https://github.com/HarshRajSinghania))
 
 ## 0.6.0 (2026-11-09)
 
