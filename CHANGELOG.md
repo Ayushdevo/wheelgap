@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The coverage scanner checks Python 3.15 and free-threaded 3.15t by default, alongside 3.13, 3.14 and 3.14t. (#117, thanks [@moelomda](https://github.com/moelomda))
 - `--dockerfile` rejects an upper-case repository name (`FROM PYTHON:3.13`) or tag variant (`python:3.13-SLIM`) instead of lowercasing it, and a tag with characters Docker doesn't allow, as Docker does. Python versions are matched with ASCII digits only, so `FROM python:3.1٣` and `-p 3.1٣` are errors instead of being read as 3.13. (#108, thanks [@bfs2021](https://github.com/bfs2021))
 - `--dockerfile` splits lines on `\n` only, matching Docker: a lone `\r` (old Mac line endings), NEL and other Unicode line breaks no longer start a new line. CRLF files still work. (#106, thanks [@chiragjangiir](https://github.com/chiragjangiir))
 - `--dockerfile` splits `FROM` lines on ASCII whitespace only, matching Docker, so a non-breaking space (e.g. after `FROM` or between words) is an error instead of quietly splitting words. A Dockerfile that isn't UTF-8 now gets a clear error. (#103, thanks [@chiragjangiir](https://github.com/chiragjangiir))
