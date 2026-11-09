@@ -84,7 +84,12 @@ def _from_lines(text: str) -> list[str]:
     parts: list[str] = []  # an instruction continued onto the next line
 
     def finish(instruction: str, joined: bool) -> None:
-        words = instruction.split(None, 1)
+        # Docker splits the keyword off on ASCII whitespace only, so `FROM<U+00A0>python` isn't a FROM to it.
+        words = re.split(r"[ \t\v\f\r]+", instruction, maxsplit=1)
+        if words[0].upper() != "FROM" and re.match(r"(?i)FROM\s", words[0]) and not _PY_IMPORT_RE.match(instruction):
+            raise DockerfileError(
+                f"unknown instruction {words[0]!r} (Docker splits instructions on ASCII whitespace only)"
+            )
         if joined and words and words[0].upper().startswith("FROM") and words[0].upper() != "FROM":
             raise DockerfileError(f"unknown instruction {words[0]!r} (a FROM joined to the next line?)")
         if words and words[0].upper() == "FROM":
@@ -145,7 +150,8 @@ def _unquote(value: str, args: str) -> str:
 
 def _split_from(args: str) -> tuple[str, str | None, str | None]:
     """`[--platform=P] image [AS name]` -> (image, platform, stage name), rejecting what Docker rejects."""
-    words = args.split()
+    stripped = args.strip(" \t\v\f\r")
+    words = re.split(r"[ \t\v\f\r]+", stripped) if stripped else []
     platform = None
     seen_platform = False
     while words and words[0].startswith("--"):
@@ -260,6 +266,11 @@ def parse_image(image: str, platform: str | None = None) -> ImageTarget:
 
 def read_dockerfile(path: Path) -> ImageTarget:
     try:
-        return parse_image(*final_image(path.read_text(encoding="utf-8-sig")))
+        text = path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as e:
+        byte = f"0x{e.object[e.start]:02x}"
+        raise DockerfileError(f"{path}: not UTF-8 (byte {byte} at offset {e.start}), pass -p/-t instead") from None
+    try:
+        return parse_image(*final_image(text))
     except DockerfileError as e:
         raise DockerfileError(f"{path}: {e}") from None

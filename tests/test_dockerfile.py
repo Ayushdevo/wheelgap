@@ -142,7 +142,7 @@ def test_cli_wheelgap_names_still_win_over_the_image(capsys, fixtures, tmp_path)
 
 def _dockerfile(tmp_path, text):
     path = tmp_path / "Dockerfile"
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")  # Docker reads UTF-8; Windows would otherwise write cp1252
     return path
 
 
@@ -309,8 +309,20 @@ def test_escape_directive_rules(tmp_path):
         ("FROM python:3.13 AS 1build\n", "invalid stage name '1build'"),
         ("FROM python:3.13 AS my@stage\n", "invalid stage name 'my@stage'"),
         ("FROM python:3.13 AS 1build\nFROM python:3.12\n", "invalid stage name '1build'"),  # any stage, as in Docker
+        ("FROM --platform=linux/arm64\u00a0python:3.13\n", "no image"),
+        ("FROM python:3.13 AS\u00a0stage\n", "expected 'IMAGE' or 'IMAGE AS NAME'"),
+        ("FROM\u00a0python:3.13\n", "unknown instruction"),  # not a FROM to Docker at all
+        ("FROM\u00a0--platform=linux/arm64 python:3.13\n", "unknown instruction"),
+        ("FROM python:3.12\nFROM\u00a0python:3.13\n", "unknown instruction"),  # mustn't fall back to 3.12
     ],
 )
 def test_dockerfiles_docker_rejects(tmp_path, text, message):
     with pytest.raises(DockerfileError, match=message):
         read_dockerfile(_dockerfile(tmp_path, text))
+
+
+def test_dockerfile_that_is_not_utf8_is_a_clear_error(tmp_path):
+    path = tmp_path / "Dockerfile"
+    path.write_bytes(b"FROM --platform=linux/arm64\xa0python:3.13\n")  # cp1252: Docker would read 0xa0 as a space
+    with pytest.raises(DockerfileError, match="not UTF-8 \\(byte 0xa0 at offset 27\\), pass -p/-t instead"):
+        read_dockerfile(path)
