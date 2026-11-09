@@ -5,12 +5,19 @@ from __future__ import annotations
 import json
 import re
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlparse
 
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.utils import canonicalize_name
+from packaging.version import Version
+
+if TYPE_CHECKING:
+    from .targets import Target
 
 LOCKFILES = (
     "uv.lock",
@@ -43,6 +50,8 @@ class Package:
     spec: str | None = None
     # Files of a pinned release that the index marks as yanked (see check.status_for).
     yanked: frozenset[str] = frozenset()
+    # uv.lock / pylock.toml: the index the lock says the package came from, e.g. https://pypi.org/simple.
+    registry: str | None = None
 
     @property
     def key(self) -> str:
@@ -64,6 +73,36 @@ class Source:
     root_edges: list[Edge] = field(default_factory=list)
     # Index into root_edges -> name of the dependency group it comes from, e.g. {0: "dev"}.
     root_groups: dict[int, str] = field(default_factory=dict)
+    # uv.lock only: the project's requires-python. uv keeps only the wheels that can serve it.
+    requires_python: str | None = None
+
+
+def pythons_outside_lock(source: Source, targets: Iterable[Target]) -> list[str]:
+    """Target Pythons the lockfile's requires-python leaves out, e.g. ['3.14t'] for `==3.13.*`.
+
+    uv keeps only the wheels that can serve requires-python (abi3 and pure wheels survive), so the lock may
+    be missing wheels for those Pythons. Like uv, only the bounds count: `!=3.12.*` doesn't exclude 3.12.
+    """
+    if not source.requires_python:
+        return []
+    try:
+        spec = SpecifierSet(",".join(str(s) for s in SpecifierSet(source.requires_python) if s.operator != "!="))
+    except InvalidSpecifier:
+        return []
+    out = []
+    for t in targets:
+        # A minor is served if any of its releases fits: its first and last patch, or a version the spec names.
+        tries = [Version(f"{t.major}.{t.minor}.0"), Version(f"{t.major}.{t.minor}.999")]
+        for s in spec:
+            try:
+                v = Version(s.version.removesuffix(".*"))
+            except ValueError:
+                continue
+            if v.release[:2] == (t.major, t.minor):
+                tries.append(v)
+        if not any(spec.contains(v, prereleases=True) for v in tries):
+            out.append(t.python)
+    return list(dict.fromkeys(out))
 
 
 def _filename(entry: dict) -> str | None:
@@ -99,6 +138,7 @@ def parse_uv_lock(path: Path) -> Source:
         if kind and "registry" not in src:
             pkg.skip = kind
         else:
+            pkg.registry = src.get("registry")
             files = [f for f in (_filename(w) for w in p.get("wheels", [])) if f]
             if p.get("sdist"):
                 files.append(_filename(p["sdist"]) or f"{p['name']}-{p.get('version')}.tar.gz")
@@ -117,6 +157,8 @@ def parse_uv_lock(path: Path) -> Source:
     source.root_edges.extend((d["name"], None, d.get("marker")) for d in manifest.get("requirements", []))
     if not source.roots and not source.root_edges:
         source.edges = None  # no idea where the graph starts; treat every package as needed
+    if isinstance(data.get("requires-python"), str):
+        source.requires_python = data["requires-python"]
     return source
 
 
@@ -124,7 +166,7 @@ def parse_pylock(path: Path) -> Source:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     pkgs = []
     for p in data.get("packages", []):
-        pkg = Package(p["name"], p.get("version"), origin=path.name)
+        pkg = Package(p["name"], p.get("version"), origin=path.name, registry=p.get("index"))
         if p.get("marker"):
             pkg.markers = [p["marker"]]
         if any(k in p for k in ("vcs", "directory", "archive")) and "wheels" not in p and "sdist" not in p:
@@ -135,7 +177,8 @@ def parse_pylock(path: Path) -> Source:
                 files.append(_filename(p["sdist"]) or f"{p['name']}-{p.get('version')}.tar.gz")
             pkg.files = files
         pkgs.append(pkg)
-    return Source(path.name, pkgs)
+    requires = data.get("requires-python")
+    return Source(path.name, pkgs, requires_python=requires if isinstance(requires, str) else None)
 
 
 def _poetry_edges(p: dict) -> list[Edge]:

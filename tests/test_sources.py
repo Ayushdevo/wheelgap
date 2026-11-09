@@ -3,7 +3,7 @@ import json
 import pytest
 
 from wheelgap.check import Status, check
-from wheelgap.sources import SourceError, find_lockfile, load_inputs, parse_requirements
+from wheelgap.sources import Source, SourceError, find_lockfile, load_inputs, parse_requirements, pythons_outside_lock
 from wheelgap.targets import build_targets
 
 
@@ -516,3 +516,39 @@ def test_odd_pyproject_never_breaks_a_poetry_run(tmp_path, pyproject):
     )
     (src,) = load_inputs([str(tmp_path)])
     assert [p.name for p in src.packages] == ["x"]
+
+
+@pytest.mark.parametrize(
+    ("requires", "pythons", "outside"),
+    [
+        ("==3.13.*", ["3.13", "3.14t"], ["3.14t"]),
+        (">=3.11.4", ["3.11", "3.12"], []),  # a patch-level floor still serves 3.11
+        (">=3.11, <3.15", ["3.10", "3.14", "3.15"], ["3.10", "3.15"]),
+        (None, ["3.14"], []),
+        ("not a specifier", ["3.14"], []),
+        ("==3.12.4", ["3.12", "3.13"], ["3.13"]),  # a pinned patch still serves its minor
+        (">=3.11,<3.11.5", ["3.11"], []),
+        ("==3.14.0rc2", ["3.14"], []),
+        (">=3.10, !=3.12.*", ["3.12"], []),  # uv only uses the bounds, so 3.12's wheels stay
+    ],
+)
+def test_pythons_outside_lock(requires, pythons, outside):
+    source = Source("uv.lock", requires_python=requires)
+    assert pythons_outside_lock(source, build_targets(pythons, ["linux-x86_64"])) == outside
+
+
+def test_uv_lock_records_requires_python(tmp_path):
+    (tmp_path / "uv.lock").write_text('version = 1\nrequires-python = "==3.13.*"\n', encoding="utf-8")
+    (src,) = load_inputs([str(tmp_path)])
+    assert src.requires_python == "==3.13.*"
+
+
+def test_pylock_records_requires_python_and_index(tmp_path):
+    (tmp_path / "pylock.toml").write_text(
+        'lock-version = "1.0"\nrequires-python = "==3.13.*"\n\n[[packages]]\nname = "fastlib"\nversion = "2.0.0"\n'
+        'index = "https://pypi.org/simple"\n'
+        'wheels = [{ name = "fastlib-2.0.0-cp313-cp313-manylinux_2_17_x86_64.whl" }]\n',
+        encoding="utf-8",
+    )
+    (src,) = load_inputs([str(tmp_path / "pylock.toml")])
+    assert src.requires_python == "==3.13.*" and src.packages[0].registry == "https://pypi.org/simple"
