@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Read custom package categories in `Pipfile.lock` (such as `[docs]` or `[tests]`), not just `default` and `develop`. (#59, thanks [@chiragjangiir](https://github.com/chiragjangiir))
+- Read Rye and uv requirements lockfiles (`requirements.lock`, `requirements-dev.lock`), and the pre-commit hook runs when they change. (#61, thanks [@chiragjangiir](https://github.com/chiragjangiir))
 
 ## 0.6.0 (2026-11-09)
 
