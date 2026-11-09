@@ -10,6 +10,8 @@
 
 Point it at your lockfile and the platforms you ship to (ARM servers, Alpine images, Windows on ARM, free-threaded Python 3.14t). It tells you which packages pip or uv will have to compile from source, and which can't be installed at all.
 
+📊 **New: [wheel coverage for the top 5,000 PyPI packages](https://wheelgap.github.io/tracker/)**, by platform and Python version, updated nightly.
+
 ![wheelgap demo](docs/demo.gif)
 
 ## Install and run (under 30 seconds)
@@ -127,7 +129,7 @@ Docker platform names also work with `-t`, for example `-t linux/amd64,linux/arm
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: patrickballard/wheelgap@v0.3.0
+- uses: patrickballard/wheelgap@v0.4.0
   with:
     args: uv.lock -p 3.13 -t linux-x86_64,linux-aarch64
 ```
@@ -139,7 +141,7 @@ The job fails when a dependency would build from source on a target you ship, fo
 ```yaml
 repos:
   - repo: https://github.com/patrickballard/wheelgap
-    rev: v0.3.0
+    rev: v0.4.0
     hooks:
       - id: wheelgap
 ```
