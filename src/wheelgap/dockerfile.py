@@ -119,6 +119,30 @@ def last_from(text: str) -> str:
     return found[-1]
 
 
+def _unquote(value: str, args: str) -> str:
+    """Strip single or double quotes as BuildKit does to flag values (parser/split_command.go, extractBuilderFlags).
+
+    Backslash escapes (and `$` expansion) aren't modelled, so a value using them is an error, never a guess.
+    """
+    if "\\" in value or "`" in value:
+        raise DockerfileError(f"FROM {args}: escapes in --platform aren't supported, pass -p/-t instead")
+    out = []
+    quote: str | None = None
+    for ch in value:
+        if quote is None:
+            if ch in ('"', "'"):
+                quote = ch
+            else:
+                out.append(ch)
+        elif ch == quote:
+            quote = None
+        else:
+            out.append(ch)
+    if quote is not None:
+        raise DockerfileError(f"FROM {args}: unterminated quote in --platform={value}")
+    return "".join(out)
+
+
 def _split_from(args: str) -> tuple[str, str | None, str | None]:
     """`[--platform=P] image [AS name]` -> (image, platform, stage name), rejecting what Docker rejects."""
     words = args.split()
@@ -135,7 +159,8 @@ def _split_from(args: str) -> tuple[str, str | None, str | None]:
         if seen_platform:
             raise DockerfileError(f"FROM {args}: duplicate --platform flag")
         seen_platform = True
-        platform = flag.split("=", 1)[1] or None  # an empty value means the default platform, as in Docker
+        # Quotes are stripped as Docker does; an empty value means the default platform, as in Docker.
+        platform = _unquote(flag.split("=", 1)[1], args) or None
     if not words:
         raise DockerfileError(f"FROM {args}: no image")
     if len(words) == 1:
