@@ -25,6 +25,42 @@ def test_gaps_exit_1(capsys, fixtures):
     assert "\033[" not in out  # no colour when not a TTY
 
 
+def test_per_target_summary(capsys, fixtures):
+    args = (str(fixtures / "uvproj"), "-p", "3.13", "-t", "linux-x86_64,musl-aarch64,win-arm64")
+    code, out, err = run(capsys, *args, "--json")
+    assert code == 1 and not err
+    assert json.loads(out)["summary"]["per_target"] == {
+        "linux-x86_64": {"source": 2, "missing": 0},
+        "musl-aarch64": {"source": 3, "missing": 0},
+        "win-arm64": {"source": 3, "missing": 1},
+    }
+    code, out, err = run(capsys, *args)
+    assert code == 1 and not err
+    assert "linux-x86_64  2 from source" in out
+    assert "musl-aarch64  3 from source" in out
+    assert "win-arm64     3 from source, 1 missing" in out
+    assert out.index("win-arm64     3 from source, 1 missing") < out.index("have gaps:")
+
+
+def test_per_target_summary_omits_clean_targets(capsys, fixtures):
+    args = (str(fixtures / "pylockproj"), "-p", "3.13", "-t", "linux-aarch64,win-arm64")
+    _, out, _ = run(capsys, *args, "--json")
+    assert json.loads(out)["summary"]["per_target"] == {"win-arm64": {"source": 0, "missing": 1}}
+    _, out, _ = run(capsys, *args)
+    assert "win-arm64  1 missing" in out
+    assert "linux-aarch64  0" not in out
+
+
+def test_single_target_has_no_text_target_summary(capsys, fixtures):
+    _, out, _ = run(capsys, str(fixtures / "uvproj"), "-p", "3.13", "-t", "musl-aarch64")
+    assert "3 from source" not in out
+
+
+def test_per_target_summary_disambiguates_python_versions(capsys, fixtures):
+    _, out, _ = run(capsys, str(fixtures / "uvproj"), "-p", "3.13,3.14", "-t", "musl-aarch64", "--json")
+    assert set(json.loads(out)["summary"]["per_target"]) == {"3.13 musl-aarch64", "3.14 musl-aarch64"}
+
+
 def test_docker_platform_names_on_cli(capsys, fixtures):
     code, out, err = run(
         capsys,

@@ -304,6 +304,36 @@ def gap_targets(row: Row, targets: list[Target]) -> list[Target]:
     return [t for t in targets if row.results[t] in (Status.SOURCE, Status.MISSING)]
 
 
+def per_target_summary(rows: list[Row], targets: list[Target]) -> dict[str, dict[str, int]]:
+    """Count source builds and missing packages separately for each affected target."""
+    multi_py = len({t.python for t in targets}) > 1
+    summary = {}
+    for target in targets:
+        counts = {
+            status.value: sum(row.results[target] == status for row in rows)
+            for status in (Status.SOURCE, Status.MISSING)
+        }
+        if any(counts.values()):
+            summary[target.label(multi_py)] = counts
+    return summary
+
+
+def render_target_summary(rows: list[Row], targets: list[Target], style: Style) -> list[str]:
+    if len(targets) < 2:
+        return []
+    summary = per_target_summary(rows, targets)
+    width = max(map(len, summary), default=0)
+    lines = []
+    for label, counts in summary.items():
+        parts = []
+        if counts["source"]:
+            parts.append(style.yellow(f"{counts['source']} from source"))
+        if counts["missing"]:
+            parts.append(style.red(f"{counts['missing']} missing"))
+        lines.append(f"{label:<{width}}  {', '.join(parts)}")
+    return lines
+
+
 def render_explain(rows: list[Row], targets: list[Target], style: Style) -> list[str]:
     multi_py = len({t.python for t in targets}) > 1
     out = []
@@ -376,7 +406,7 @@ def report_json(
             "targets": [{"label": t.label(multi_py), "python": t.python, "platform": t.platform} for t in targets],
             "packages": [package(r) for r in rows],
             "skipped": [{"name": p.name, "reason": p.skip} for p in skipped],
-            "summary": {"packages": len(rows), "with_gaps": len(gaps)},
+            "summary": {"packages": len(rows), "with_gaps": len(gaps), "per_target": per_target_summary(rows, targets)},
         },
         indent=2,
     )
@@ -686,6 +716,8 @@ def main(argv: list[str] | None = None) -> int:
         print(style.green(f"✓ {what} a wheel for {'every one of ' if n_t > 1 else ''}{n_t} target{'s' * (n_t > 1)}."))
         return 0
 
+    for line in render_target_summary(gaps, targets, style):
+        print(line)
     print(gap_summary(gaps, len(rows), style))
     if not args.explain:
         print(style.dim("Run with --explain to see which wheels were rejected and why."))

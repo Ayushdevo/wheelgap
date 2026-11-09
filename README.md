@@ -88,6 +88,8 @@ Each cell in the table is one of:
 | `✓ bundled` | no wheel on PyPI, but Pyodide ships its own build (with `--pyodide-lock`) |
 
 Packages that are fine everywhere are hidden; `--all` shows them.
+With several targets, the text summary lists source-build and missing-package counts for each affected target.
+JSON reports expose these counts under `summary.per_target`, keyed by the same target labels as package results.
 
 `--explain` lists, for each gap, the wheels that were rejected and why, closest misses first:
 
