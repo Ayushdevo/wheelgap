@@ -125,7 +125,7 @@ Docker platform names also work with `-t`, for example `-t linux/amd64,linux/arm
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: patrickballard/wheelgap@v0.2.0
+- uses: patrickballard/wheelgap@v0.3.0
   with:
     args: uv.lock -p 3.13 -t linux-x86_64,linux-aarch64
 ```
@@ -137,7 +137,7 @@ The job fails when a dependency would build from source on a target you ship, fo
 ```yaml
 repos:
   - repo: https://github.com/patrickballard/wheelgap
-    rev: v0.2.0
+    rev: v0.3.0
     hooks:
       - id: wheelgap
 ```

@@ -1,3 +1,3 @@
 """wheelgap: find the dependencies that have no prebuilt wheel for your target platform."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

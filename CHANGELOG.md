@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-09)
 
-- `--pyodide-lock PATH_OR_URL` (or `pyodide-lock` in `[tool.wheelgap]`): read a Pyodide release's `pyodide-lock.json`, so packages Pyodide ships itself (numpy, pydantic-core…) count as `✓ bundled` on `-t pyodide`. A different bundled version is noted, and `--json` records it. (#39)
-- New `pyodide` target (aliases `wasm`, `emscripten`) for Python in the browser: Python 3.12–3.14, accepting both the legacy `pyodide_*` and the PEP 783 `pyemscripten_*` tags for each ABI. sdist-only packages are reported as missing there, since Pyodide can't build from source. Not included in `-t all`. (#4)
+Thanks to [@draarivpatel-ui](https://github.com/draarivpatel-ui), [@Daiyuanranfeng](https://github.com/Daiyuanranfeng), [@Swarneil1905](https://github.com/Swarneil1905) and [@jwalith4418-Mj](https://github.com/jwalith4418-Mj), whose first PRs are in this release.
+
+- `--pyodide-lock PATH_OR_URL` (or `pyodide-lock` in `[tool.wheelgap]`): read a Pyodide release's `pyodide-lock.json`, so packages Pyodide ships itself (numpy, pydantic-core…) count as `✓ bundled` on `-t pyodide`. A different bundled version is noted, and `--json` records it. (#40)
+- New `pyodide` target (aliases `wasm`, `emscripten`) for Python in the browser: Python 3.12–3.14, accepting both the legacy `pyodide_*` and the PEP 783 `pyemscripten_*` tags for each ABI. sdist-only packages are reported as missing there, since Pyodide can't build from source. Not included in `-t all`. (#38)
 - Support `pdm.lock` inputs, reading the distribution filenames and package markers recorded in the lockfile so PDM projects can be checked offline. Entries without a files list are looked up on PyPI. (#36, thanks [@draarivpatel-ui](https://github.com/draarivpatel-ui))
 - Without `-p`, the Python versions come from a `.python-version` file next to the lockfile (or `pyproject.toml`) before falling back to the running Python. `-p`, `--dockerfile` and `[tool.wheelgap]` still win. Entries wheelgap can't use, such as `system`, are skipped with a note. (#34, thanks [@draarivpatel-ui](https://github.com/draarivpatel-ui))
 - `--dockerfile` can infer targets from Astral uv's Python-tagged Debian and Alpine images (`ghcr.io/astral-sh/uv:python3.13-bookworm-slim`), including uv version pins. (#32, thanks [@Daiyuanranfeng](https://github.com/Daiyuanranfeng))
