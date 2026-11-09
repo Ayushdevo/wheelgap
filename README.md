@@ -42,6 +42,9 @@ wheelgap -p 3.14t -t all
 # Several Pythons at once, Linux on both architectures
 wheelgap uv.lock -p 3.12,3.13,3.14 -t linux-x86_64,linux-aarch64
 
+# No -p? A .python-version file next to uv.lock (written by uv or pyenv) sets the Python
+wheelgap uv.lock -t linux-x86_64
+
 # Check a Pipenv project's default and development dependencies
 wheelgap Pipfile.lock -p 3.13 -t linux-x86_64,linux-aarch64
 
@@ -105,7 +108,7 @@ If you think wheelgap got a package wrong, that output (or `--json --explain`) i
 
 Docker platform names also work with `-t`, for example `-t linux/amd64,linux/arm64` (also `linux/arm64/v8`).
 
-`-t all` checks all eight. Python versions take a trailing `t` for free-threaded builds (`3.14t`), which correctly rejects `abi3` wheels. Without `-p`, wheelgap uses the Python it is running on.
+`-t all` checks all eight. Python versions take a trailing `t` for free-threaded builds (`3.14t`), which correctly rejects `abi3` wheels. Without `-p`, wheelgap reads a `.python-version` file next to the lockfile (or `pyproject.toml`) if there is one, and otherwise uses the Python it is running on.
 
 ### In CI (GitHub Action)
 

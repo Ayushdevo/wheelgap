@@ -162,3 +162,54 @@ def test_default_python_on_freethreaded_build(capsys, fixtures):
     code = main([str(fixtures / "pylockproj"), "-t", "linux-aarch64", "--json"])
     assert code in (0, 1)
     assert json.loads(capsys.readouterr().out)["targets"][0]["python"].endswith("t")
+
+
+def project_with_lock(tmp_path, fixtures):
+    (tmp_path / "uv.lock").write_bytes((fixtures / "uvproj" / "uv.lock").read_bytes())
+    return tmp_path
+
+
+def test_python_version_file_sets_default(capsys, fixtures, tmp_path):
+    project = project_with_lock(tmp_path, fixtures)
+    (project / ".python-version").write_text("3.14t\n", encoding="utf-8")
+    code, out, err = run(capsys, str(project), "-t", "win-amd64", "--json")
+    assert code == 1 and not err
+    assert [t["python"] for t in json.loads(out)["targets"]] == ["3.14t"]
+
+
+def test_python_version_file_several_lines_and_patch_versions(capsys, fixtures, tmp_path):
+    project = project_with_lock(tmp_path, fixtures)
+    (project / ".python-version").write_text("3.13.1\n# both builds\n\n3.14t\n", encoding="utf-8")
+    _, out, _ = run(capsys, str(project), "-t", "win-amd64", "--json")
+    assert [t["python"] for t in json.loads(out)["targets"]] == ["3.13", "3.14t"]
+
+
+def test_flags_beat_python_version_file(capsys, fixtures, tmp_path):
+    project = project_with_lock(tmp_path, fixtures)
+    (project / ".python-version").write_text("3.14t\n", encoding="utf-8")
+    _, out, _ = run(capsys, str(project), "-p", "3.12", "-t", "win-amd64", "--json")
+    assert [t["python"] for t in json.loads(out)["targets"]] == ["3.12"]
+
+
+def test_pyproject_beats_python_version_file(capsys, fixtures, tmp_path):
+    project = project_with_lock(tmp_path, fixtures)
+    (project / ".python-version").write_text("3.14t\n", encoding="utf-8")
+    (project / "pyproject.toml").write_text('[tool.wheelgap]\npython = ["3.12"]\n', encoding="utf-8")
+    _, out, _ = run(capsys, str(project), "-t", "win-amd64", "--json")
+    assert [t["python"] for t in json.loads(out)["targets"]] == ["3.12"]
+
+
+def test_python_version_file_skips_unusable_lines(capsys, fixtures, tmp_path):
+    project = project_with_lock(tmp_path, fixtures)
+    (project / ".python-version").write_text("system\npypy@3.10\n3.13\n", encoding="utf-8")
+    code, out, err = run(capsys, str(project), "-t", "win-amd64", "--json")
+    assert code == 1
+    assert "ignoring 'system'" in err and "ignoring 'pypy@3.10'" in err
+    assert [t["python"] for t in json.loads(out)["targets"]] == ["3.13"]
+
+
+def test_python_version_file_with_nothing_usable_uses_running_python(capsys, fixtures, tmp_path):
+    project = project_with_lock(tmp_path, fixtures)
+    (project / ".python-version").write_text("system\n", encoding="utf-8")
+    _, out, _ = run(capsys, str(project), "-t", "win-amd64", "--json")
+    assert [t["python"] for t in json.loads(out)["targets"]] == [cli.running_python()]

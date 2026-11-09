@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import sysconfig
 import tomllib
@@ -56,7 +57,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="append",
         default=[],
         metavar="VER",
-        help=f"target Python, e.g. 3.13 or 3.14t (repeatable; default: {running_python()})",
+        help=f"target Python, e.g. 3.13 or 3.14t (repeatable; default: .python-version, else {running_python()})",
     )
     p.add_argument(
         "-t",
@@ -97,15 +98,42 @@ LIST_KEYS = ("python", "targets")
 STR_KEYS = ("glibc", "musl", "macos", "fail-on")
 
 
-def find_pyproject(inputs: list[str]) -> Path | None:
-    """pyproject.toml next to the first lockfile or directory given, else in the current directory."""
+def project_dir(inputs: list[str]) -> Path:
+    """The folder of the first lockfile or directory given, else the current directory."""
     for item in inputs:
         p = Path(item)
         if p.is_dir() or p.is_file():
-            candidate = (p if p.is_dir() else p.parent) / "pyproject.toml"
-            return candidate if candidate.is_file() else None
-    candidate = Path("pyproject.toml")
+            return p if p.is_dir() else p.parent
+    return Path(".")
+
+
+def find_pyproject(inputs: list[str]) -> Path | None:
+    """pyproject.toml in the project folder (see project_dir)."""
+    candidate = project_dir(inputs) / "pyproject.toml"
     return candidate if candidate.is_file() else None
+
+
+PYTHON_VERSION_FILE = ".python-version"
+# uv and pyenv write "3.13", "3.13.1" or "3.14t"; anything else (system, pypy@3.10) is skipped.
+PYTHON_VERSION_LINE = re.compile(r"3\.(\d+)(?:\.\d+)?(t?)")
+
+
+def read_python_version(folder: Path) -> list[str]:
+    """Versions from the .python-version file in folder, e.g. ['3.13'] for a line '3.13.1'."""
+    path = folder / PYTHON_VERSION_FILE
+    if not path.is_file():
+        return []
+    versions = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        entry = line.split("#", 1)[0].strip()
+        if not entry:
+            continue
+        m = PYTHON_VERSION_LINE.fullmatch(entry)
+        if m:
+            versions.append(f"3.{m.group(1)}{m.group(2)}")
+        else:
+            print(f"wheelgap: note: ignoring {entry!r} in {path}", file=sys.stderr)
+    return versions
 
 
 def load_config(path: Path) -> dict:
@@ -279,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
             config.update(python=[image.python], targets=[image.platform])
             config.update({k: v for k, v in (("glibc", image.glibc), ("musl", image.musl)) if v})
         targets = build_targets(
-            args.python or config.get("python") or [running_python()],
+            args.python or config.get("python") or read_python_version(project_dir(args.inputs)) or [running_python()],
             args.target or config.get("targets", []),
             args.glibc or config.get("glibc", "2.36"),
             args.musl or config.get("musl", "1.2"),
