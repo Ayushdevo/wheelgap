@@ -10,6 +10,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from packaging.utils import canonicalize_name
+
 from . import __version__
 from .api import running_python
 from .check import Row, Status, check, explain, has_sdist
@@ -139,6 +141,12 @@ def make_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--exit-zero", action="store_true", help="exit 0 even when gaps are found")
     p.add_argument(
+        "--ignore",
+        action="append",
+        metavar="NAME",
+        help="accept known gaps for these package names (repeatable, comma-separated; overrides config)",
+    )
+    p.add_argument(
         "--fail-on",
         choices=FAIL_ON,
         help="exit 1 on any gap ('source', the default) or only when a package can't install ('missing')",
@@ -150,7 +158,7 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 FAIL_ON = ("source", "missing")
-LIST_KEYS = ("python", "targets")
+LIST_KEYS = ("python", "targets", "ignore")
 STR_KEYS = ("glibc", "musl", "macos", "ios", "android-api", "fail-on", "pyodide-lock")
 
 
@@ -347,6 +355,7 @@ def report_json(
     skipped: list,
     explained: bool,
     pyodide_lock: PyodideLock | None = None,
+    ignored: set[str] | None = None,
 ) -> str:
     multi_py = len({t.python for t in targets}) > 1
     gaps = [r for r in rows if not r.ok]
@@ -356,6 +365,7 @@ def report_json(
             "name": r.package.name,
             "version": r.package.version,
             "error": r.package.error,
+            "ignored": r.package.key in (ignored or set()),
             "results": {t.label(multi_py): r.results[t].value for t in targets},
         }
         if pyodide_lock and Status.BUNDLED in r.results.values():
@@ -483,6 +493,7 @@ def render_markdown(
     args: argparse.Namespace,
     pyodide_lock: PyodideLock | None,
     source_allowed: bool = False,
+    ignored: set[str] | None = None,
 ) -> list[str]:
     """The same report as the text output, as GitHub-flavoured Markdown (for a job summary or a PR comment)."""
     plain = Style(False)
@@ -519,6 +530,9 @@ def render_markdown(
         out += [gap_summary(gaps, len(rows), plain), ""]
         if source_allowed:
             out += ["Source builds are allowed (fail-on missing), so this run passes.", ""]
+    ignored_rows = [r for r in rows if r.package.key in (ignored or set())]
+    if ignored_rows:
+        out += ["ignored: " + ", ".join(_code(r.package.name) for r in ignored_rows), ""]
     bundled = [r for r in rows if Status.BUNDLED in r.results.values()]
     if bundled and pyodide_lock:
         out += [_md(bundled_line(bundled, pyodide_lock)), ""]
@@ -560,6 +574,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         pyproject = find_pyproject(args.inputs)
         config = load_config(pyproject) if pyproject else {}
+        ignore_specs = args.ignore if args.ignore is not None else config.get("ignore", [])
+        ignored: set[str] = {
+            canonicalize_name(name.strip()) for item in ignore_specs for name in item.split(",") if name.strip()
+        }
         quiet = args.quiet if args.quiet is not None else config.get("quiet", False)
         # Quiet only changes the text output, so it can't clash with --explain when printing JSON or Markdown.
         if quiet and args.explain and not (args.json or args.markdown):
@@ -626,16 +644,22 @@ def main(argv: list[str] | None = None) -> int:
     gaps = [r for r in rows if not r.ok]
     source_labels = [s.label for s in sources]
     # With --fail-on missing, source builds are accepted; missing and unknown packages still fail.
-    failing = gaps if fail_on == "source" else [r for r in gaps if r.fails_install]
+    unignored_gaps = [r for r in gaps if r.package.key not in ignored]
+    failing = unignored_gaps if fail_on == "source" else [r for r in unignored_gaps if r.fails_install]
     code = 0 if args.exit_zero or not failing else 1
+    source_allowed = fail_on == "missing" and bool(unignored_gaps) and not failing
+    ignored_names = [r.package.name for r in rows if r.package.key in ignored]
 
     if args.json:
-        print(report_json(rows, targets, source_labels, skipped, args.explain, pyodide_lock))
+        print(report_json(rows, targets, source_labels, skipped, args.explain, pyodide_lock, ignored))
         return code
 
     if args.markdown:
-        source_allowed = bool(gaps) and not failing  # judged on --fail-on alone, not --exit-zero
-        print("\n".join(render_markdown(rows, targets, source_labels, skipped, args, pyodide_lock, source_allowed)))
+        print(
+            "\n".join(
+                render_markdown(rows, targets, source_labels, skipped, args, pyodide_lock, source_allowed, ignored)
+            )
+        )
         return code
 
     style = Style(use_color(args.color))
@@ -643,6 +667,8 @@ def main(argv: list[str] | None = None) -> int:
         if gaps:
             print(gap_summary(gaps, len(rows), style))
             print("gaps: " + ", ".join(r.package.name for r in gaps))
+        if ignored_names:
+            print(style.dim("ignored: " + ", ".join(ignored_names)))
         for r in rows:
             if r.package.error:  # say why a package is "unknown", even in quiet mode
                 print(f"wheelgap: could not check {r.package.name}: {r.package.error}", file=sys.stderr)
@@ -679,6 +705,8 @@ def main(argv: list[str] | None = None) -> int:
     errors = [r for r in rows if r.package.error]
     for r in errors:
         print(style.dim(f"could not check {r.package.name}: {r.package.error}"))
+    if ignored_names:
+        print(style.dim("ignored: " + ", ".join(ignored_names)))
 
     n_t = len(targets)
     if not gaps:
@@ -689,7 +717,7 @@ def main(argv: list[str] | None = None) -> int:
     print(gap_summary(gaps, len(rows), style))
     if not args.explain:
         print(style.dim("Run with --explain to see which wheels were rejected and why."))
-    if gaps and not failing and not args.exit_zero:
+    if source_allowed and not args.exit_zero:
         print(style.dim("Source builds are allowed (--fail-on missing), so this run passes."))
     return code
 

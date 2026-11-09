@@ -89,6 +89,12 @@ Each cell in the table is one of:
 
 Packages that are fine everywhere are hidden; `--all` shows them.
 
+Accept known gaps you build yourself with `wheelgap --ignore psycopg2,pyyaml`.
+`--ignore` is repeatable and matches names case-insensitively with equivalent dots, underscores and dashes.
+Set `ignore = ["psycopg2", "pyyaml"]` under `[tool.wheelgap]` for project defaults; command-line ignores replace that list.
+The package results and gap counts remain visible, and text reports list `ignored:` names.
+JSON marks each package with `"ignored": true` or `false`. Ignored packages do not count towards the exit code.
+
 `--explain` lists, for each gap, the wheels that were rejected and why, closest misses first:
 
 ```
