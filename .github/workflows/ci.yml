@@ -37,6 +37,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
       - run: uv run --group dev ruff check .
       - run: uv run --group dev ruff format --check .
+      - run: uv run --group dev mypy
 
   dogfood:
     name: wheelgap checks its own uv.lock (via the action)
