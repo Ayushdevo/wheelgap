@@ -77,7 +77,7 @@ def _from_lines(text: str) -> list[str]:
     so a line in one that looks exactly like a FROM instruction (say, SQL's `FROM base` naming a
     stage) is still read as one: a known limit, pass -p/-t for such Dockerfiles.
     """
-    lines = [raw.rstrip("\r") for raw in text.splitlines()]
+    lines = [raw.rstrip("\r") for raw in text.split("\n")]  # Docker's trimNewline drops every trailing \r
     esc = re.escape(_escape_char(lines))
     continued = re.compile(rf"(?<!{esc}){esc}[ \t]*$")  # one escape char at the end, not two
     found = []
@@ -266,7 +266,7 @@ def parse_image(image: str, platform: str | None = None) -> ImageTarget:
 
 def read_dockerfile(path: Path) -> ImageTarget:
     try:
-        text = path.read_text(encoding="utf-8-sig")
+        text = path.read_bytes().decode("utf-8-sig")
     except UnicodeDecodeError as e:
         byte = f"0x{e.object[e.start]:02x}"
         raise DockerfileError(f"{path}: not UTF-8 (byte {byte} at offset {e.start}), pass -p/-t instead") from None
