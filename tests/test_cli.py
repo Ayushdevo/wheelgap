@@ -101,6 +101,29 @@ def test_pipfile_lock_json(capsys, fixtures, fake_pypi, input_name):
     ]
 
 
+@pytest.mark.parametrize("input_name", ["pdmproj", "pdmproj/pdm.lock"])
+def test_pdm_lock_json(capsys, fixtures, fake_pypi, input_name):
+    code, out, err = run(capsys, str(fixtures / input_name), "-p", "3.13", "-t", "linux-x86_64,musl-aarch64", "--json")
+    assert code == 1
+    assert not err
+    data = json.loads(out)
+    assert data["sources"] == ["pdm.lock"]
+    packages = {p["name"]: p for p in data["packages"]}
+    assert packages["fastlib"]["results"] == {"linux-x86_64": "source", "musl-aarch64": "wheel"}
+    assert "backport" not in packages  # marker excludes it on 3.13
+    assert data["skipped"] == [{"name": "localpkg", "reason": "path"}]
+    assert not fake_pypi
+
+
+def test_pdm_lock_marker_on_older_python(capsys, fixtures, fake_pypi):
+    code, out, err = run(capsys, str(fixtures / "pdmproj"), "-p", "3.12", "-t", "linux-x86_64", "--json")
+    assert code == 1
+    assert not err
+    packages = {p["name"]: p for p in json.loads(out)["packages"]}
+    assert packages["backport"]["results"] == {"linux-x86_64": "source"}
+    assert not fake_pypi
+
+
 def test_pipfile_lock_in_current_directory(capsys, fixtures, fake_pypi, monkeypatch):
     monkeypatch.chdir(fixtures / "pipenvproj")
     code, out, err = run(capsys, "-p", "3.13", "-t", "linux-x86_64")

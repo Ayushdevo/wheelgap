@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlparse
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
-LOCKFILES = ("uv.lock", "pylock.toml", "poetry.lock", "Pipfile.lock", "requirements.txt")
+LOCKFILES = ("uv.lock", "pylock.toml", "poetry.lock", "pdm.lock", "Pipfile.lock", "requirements.txt")
 
 
 class SourceError(ValueError):
@@ -141,6 +141,22 @@ def parse_poetry_lock(path: Path) -> Source:
     return Source(path.name, pkgs)
 
 
+def parse_pdm_lock(path: Path) -> Source:
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    pkgs = []
+    for p in data.get("package", []):
+        pkg = Package(p["name"], p.get("version"), origin=path.name)
+        if p.get("marker"):
+            pkg.markers = [p["marker"]]
+        src_type = next((k for k in ("git", "path", "url", "file") if k in p), None)
+        if src_type:
+            pkg.skip = src_type
+        else:
+            pkg.files = [f for f in (_filename(e) for e in p.get("files", [])) if f]
+        pkgs.append(pkg)
+    return Source(path.name, pkgs)
+
+
 def parse_pipfile_lock(path: Path) -> Source:
     data = json.loads(path.read_text(encoding="utf-8"))
     pkgs = []
@@ -221,6 +237,7 @@ PARSERS = {
     "uv.lock": parse_uv_lock,
     "pylock.toml": parse_pylock,
     "poetry.lock": parse_poetry_lock,
+    "pdm.lock": parse_pdm_lock,
     "Pipfile.lock": parse_pipfile_lock,
 }
 
@@ -236,7 +253,8 @@ def load_file(path: Path) -> Source:
     if name.endswith((".txt", ".in")):
         return parse_requirements(path)
     raise SourceError(
-        f"don't know how to read {path} (expected uv.lock, pylock.toml, poetry.lock, Pipfile.lock or requirements.txt)"
+        f"don't know how to read {path} "
+        "(expected uv.lock, pylock.toml, poetry.lock, pdm.lock, Pipfile.lock or requirements.txt)"
     )
 
 

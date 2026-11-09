@@ -35,6 +35,17 @@ def test_poetry_lock(fixtures):
     assert pkgs["localpkg"].skip == "directory"
 
 
+@pytest.mark.parametrize("input_name", ["pdmproj", "pdmproj/pdm.lock"])
+def test_pdm_lock(fixtures, input_name):
+    (src,) = load_inputs([str(fixtures / input_name)])
+    pkgs = by_name(src)
+    assert src.label == "pdm.lock"
+    assert pkgs["fastlib"].files == ["fastlib-2.0.0-cp313-cp313-musllinux_1_2_aarch64.whl", "fastlib-2.0.0.tar.gz"]
+    assert pkgs["backport"].markers == ["python_version < '3.13'"]
+    assert pkgs["localpkg"].skip == "path"
+    assert all(p.origin == "pdm.lock" for p in src.packages)
+
+
 def test_pylock(fixtures):
     (src,) = load_inputs([str(fixtures / "pylockproj")])
     pkgs = by_name(src)
