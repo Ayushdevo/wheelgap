@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `--dockerfile` rejects stage names Docker rejects (e.g. `AS 1build` or `AS my@stage`) instead of accepting them. (#100, thanks [@chiragjangiir](https://github.com/chiragjangiir))
 - `--list-targets` shows the glibc 2.17 floor for non-x86 Linux targets (e.g. `glibc 2.17 to 2.36` for `linux-aarch64`), and the README targets table says so too. A `Pipfile.lock` or `pyodide-lock.json` that isn't a JSON object, or a Pipfile.lock entry with a non-string version, is now a clear error instead of an `AttributeError`. With `-q`, the lock note added in 0.6.2 only appears when some packages couldn't be re-checked. (#99)
 
 ## 0.6.2 (2026-11-09)

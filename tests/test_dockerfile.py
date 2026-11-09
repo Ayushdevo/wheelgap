@@ -166,6 +166,8 @@ def test_stage_names_are_lowercased_like_docker(tmp_path):
     # Docker lowercases the AS name but looks a reference up as written (and image names are lowercase).
     text = "FROM python:3.13 as Base\nFROM base\n"
     assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.13", "linux-x86_64")
+    text = "FROM python:3.13 AS build-env_1.2\nFROM build-env_1.2\n"
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.13", "linux-x86_64")
     with pytest.raises(DockerfileError, match="FROM BASE: not an earlier stage"):
         read_dockerfile(_dockerfile(tmp_path, "FROM python:3.13 as Base\nFROM BASE\n"))
 
@@ -297,6 +299,9 @@ def test_escape_directive_rules(tmp_path):
         ("FROM --platform=linux/arm64 --platform=linux/amd64 python:3.13\n", "duplicate --platform flag"),
         ("FROM --platform= --platform=linux/arm64 python:3.13\n", "duplicate --platform flag"),
         ("FROM python:3.13 AS\nFROM python:3.12\n", "expected 'IMAGE' or 'IMAGE AS NAME'"),
+        ("FROM python:3.13 AS 1build\n", "invalid stage name '1build'"),
+        ("FROM python:3.13 AS my@stage\n", "invalid stage name 'my@stage'"),
+        ("FROM python:3.13 AS 1build\nFROM python:3.12\n", "invalid stage name '1build'"),  # any stage, as in Docker
     ],
 )
 def test_dockerfiles_docker_rejects(tmp_path, text, message):
