@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from wheelgap.scan import main, scan_targets
 
 
@@ -18,10 +20,34 @@ def test_scan_targets_add_pyodide_only_where_it_exists():
     assert sum(1 for x in labels if x.startswith("3.14t ")) == 8
 
 
+def test_scan_targets_removes_duplicate_versions_in_order():
+    assert scan_targets("3.14t,3.13,cp314t,3.13") == scan_targets("3.14t,3.13")
+
+
+@pytest.mark.parametrize(
+    ("flag", "value", "message"),
+    [
+        ("--top", "-5", "must be a positive integer"),
+        ("--top", "0", "must be a positive integer"),
+        ("--workers", "0", "must be a positive integer"),
+        ("--workers", "-1", "must be a positive integer"),
+        ("--top", "1.5", "must be a positive integer"),
+        ("--workers", "abc", "must be a positive integer"),
+        ("--python", " , ", "provide at least one Python version"),
+        ("--python", "invalid", "can't parse Python version"),
+    ],
+)
+def test_scan_rejects_invalid_arguments_before_loading_data(tmp_path, capsys, flag, value, message):
+    with pytest.raises(SystemExit) as error:
+        main([flag, value, "--top-packages", str(tmp_path / "missing.json")])
+    assert error.value.code == 2
+    assert message in capsys.readouterr().err
+
+
 def test_scan_writes_the_tracker_data(fake_pypi, tmp_path, capsys):
     top = write_top(tmp_path, ["purewheel", "fastlib", "nowheels", "does-not-exist"])
     out = tmp_path / "coverage.json"
-    assert main(["--top", "3", "--python", "3.13", "--top-packages", str(top), "--out", str(out)]) == 0
+    assert main(["--top", "3", "--python", "3.13,cp313", "--top-packages", str(top), "--out", str(out)]) == 0
     data = json.loads(out.read_text())
 
     assert data["schema"] == 1

@@ -19,6 +19,26 @@ def test_make_targets_takes_cli_style_names():
         wheelgap.make_targets(python="3.13", platforms="solaris")
 
 
+@pytest.mark.parametrize("python", ["", " , "])
+def test_make_targets_uses_running_python_for_empty_input(python):
+    assert wheelgap.make_targets(python=python) == wheelgap.make_targets()
+
+
+def test_make_targets_empty_python_keeps_other_options():
+    kwargs = dict(platforms="linux-x86_64", glibc="2.28")
+    assert wheelgap.make_targets(python="", **kwargs) == wheelgap.make_targets(**kwargs)
+
+
+def test_package_checks_reject_empty_targets_before_lookup(fake_pypi):
+    with pytest.raises(ValueError, match="at least one target"):
+        wheelgap.check_packages(["purewheel"], targets=[])
+    with pytest.raises(ValueError, match="at least one target"):
+        wheelgap.check_package("purewheel", targets=[])
+    with pytest.raises(ValueError, match="at least one target"):
+        wheelgap.check_package("purewheel", targets=[], files=["purewheel-1.0-py3-none-any.whl"])
+    assert not fake_pypi
+
+
 def test_check_package_offline_with_files():
     targets = wheelgap.make_targets(python="3.13", platforms=["linux-x86_64", "musl-aarch64"])
     files = ["x-1.0-cp313-cp313-manylinux_2_17_x86_64.whl", "x-1.0.tar.gz"]
