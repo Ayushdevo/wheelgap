@@ -40,12 +40,21 @@ def test_parse_python_rejects_garbage():
     [
         ("alpine", "musl-x86_64"),
         ("linux-arm64", "linux-aarch64"),
+        ("linux/amd64", "linux-x86_64"),
+        ("linux/arm64", "linux-aarch64"),
+        ("linux/arm64/v8", "linux-aarch64"),
+        (" LINUX/ARM64/V8 ", "linux-aarch64"),
         ("windows", "win-amd64"),
         ("MACOS_INTEL", "macos-x86_64"),
     ],
 )
 def test_aliases(alias, expected):
     assert resolve_platform(alias) == expected
+
+
+def test_docker_platform_list():
+    targets = build_targets(["3.13"], ["linux/amd64,linux/arm64,linux/arm64/v8"])
+    assert [target.platform for target in targets] == ["linux-x86_64", "linux-aarch64"]
 
 
 def test_unknown_platform():
@@ -120,6 +129,11 @@ def test_build_targets_defaults_and_all():
     assert len(ts) == 2 * len(PLATFORMS)
     ts = build_targets(["3.13"], ["alpine,linux", "alpine"])
     assert [x.platform for x in ts] == ["musl-x86_64", "linux-x86_64"]
+
+
+def test_build_targets_accepts_docker_platform_list():
+    ts = build_targets(["3.13"], ["linux/amd64,linux/arm64,linux/arm64/v8"])
+    assert [x.platform for x in ts] == ["linux-x86_64", "linux-aarch64"]
 
 
 def test_build_targets_bad_glibc():

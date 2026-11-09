@@ -90,14 +90,16 @@ If you think wheelgap got a package wrong, that output (or `--json --explain`) i
 
 | name | aliases | wheel tags it accepts |
 | --- | --- | --- |
-| `linux-x86_64` | `linux`, `linux-amd64` | `manylinux_2_*_x86_64` up to `--glibc` (default 2.36), legacy `manylinux2014`/`2010`/`1` |
-| `linux-aarch64` | `linux-arm64` | `manylinux_2_*_aarch64` |
+| `linux-x86_64` | `linux`, `linux-amd64`, `linux/amd64` | `manylinux_2_*_x86_64` up to `--glibc` (default 2.36), legacy `manylinux2014`/`2010`/`1` |
+| `linux-aarch64` | `linux-arm64`, `linux/arm64`, `linux/arm64/v8` | `manylinux_2_*_aarch64` |
 | `musl-x86_64` | `alpine`, `musl` | `musllinux_1_*_x86_64` up to `--musl` (default 1.2) |
 | `musl-aarch64` | `alpine-arm64` | `musllinux_1_*_aarch64` |
 | `macos-arm64` | `macos`, `mac` | `macosx_*_arm64` and `universal2` up to `--macos` (default 14.0) |
 | `macos-x86_64` | `macos-intel` | `macosx_*_x86_64` and `universal2` |
 | `win-amd64` | `windows`, `win` | `win_amd64` |
 | `win-arm64` | `windows-arm64` | `win_arm64` |
+
+Docker platform names also work with `-t`, for example `-t linux/amd64,linux/arm64` (also `linux/arm64/v8`).
 
 `-t all` checks all eight. Python versions take a trailing `t` for free-threaded builds (`3.14t`), which correctly rejects `abi3` wheels. Without `-p`, wheelgap uses the Python it is running on.
 
