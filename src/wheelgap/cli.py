@@ -24,6 +24,7 @@ from .targets import (
     DEFAULT_MUSL,
     DEFAULT_PLATFORMS,
     PLATFORMS,
+    PYODIDE_PLATFORMS,
     Target,
     TargetError,
     build_targets,
@@ -339,6 +340,8 @@ def print_target_list(args: argparse.Namespace) -> None:
     for family, (label, version) in versions.items():
         major, minor = parse_version_pair(version, label)
         limits[family] = f", {label} <= {major}.{minor}"
+    pythons = ", ".join(f"{a}.{b}" for a, b in PYODIDE_PLATFORMS)
+    limits["pyodide"] = f", Python {pythons} (not in -t all)"
 
     rows = [
         (name, aliases[name], f"{family} {arch}{limits.get(family, '')}") for name, (family, arch) in PLATFORMS.items()

@@ -186,7 +186,7 @@ def test_list_targets_json_includes_every_platform_and_alias(capsys):
     by_name = {row["name"]: row for row in rows}
     assert "glibc <= 2.36" in by_name["linux-x86_64"]["accepts"]
     assert "macOS <= 14.0" in by_name["macos-arm64"]["accepts"]
-    assert by_name["pyodide"]["accepts"] == "pyodide wasm32"
+    assert by_name["pyodide"]["accepts"] == "pyodide wasm32, Python 3.11, 3.12, 3.13, 3.14 (not in -t all)"
 
 
 def test_list_targets_respects_compatibility_overrides(capsys):

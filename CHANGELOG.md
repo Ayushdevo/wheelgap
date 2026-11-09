@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `--list-targets` now shows platform aliases and compatibility limits, with JSON output available via `--json`. (#33)
+- `--list-targets` now shows platform aliases and compatibility limits (the Python versions for `pyodide`), with JSON output available via `--json`. (#41, thanks [@Daiyuanranfeng](https://github.com/Daiyuanranfeng))
 
 ## 0.3.0 (2026-11-09)
 
