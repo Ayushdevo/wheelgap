@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- An `https://` lookup (PyPI or `--pyodide-lock`) no longer follows a redirect to plain `http://`; it fails with an error naming both URLs. (#95, thanks [@Mr45401](https://github.com/Mr45401))
+
 ## 0.6.1 (2026-11-09)
 
 Two more lockfile formats, and safer `--pyodide-lock` fetching.
