@@ -295,6 +295,7 @@ def _add_once(pkgs: list[Package], seen: dict[tuple[str, str | None], Package], 
 
 def parse_pdm_lock(path: Path) -> Source:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
+    legacy_files = data.get("metadata", {}).get("files", {})
     pkgs: list[Package] = []
     seen: dict[tuple[str, str | None], Package] = {}
     for p in data.get("package", []):
@@ -304,9 +305,24 @@ def parse_pdm_lock(path: Path) -> Source:
         src_type = next((k for k in ("git", "hg", "svn", "bzr", "path", "url", "file") if k in p), None)
         if src_type:
             pkg.skip = src_type
-        elif "files" in p:
-            pkg.files = [f for f in (_filename(e) for e in p["files"]) if f]
-        # No files list at all: leave files as None so the PyPI lookup fills them in.
+        else:
+            entries = p.get("files")
+            if entries is None:
+                # Older lockfiles (PDM before 2.8) keep files in one [metadata.files] table
+                # keyed by "name version", with the name as PDM wrote it, which isn't always
+                # normalized ("Jinja2 3.1.2" for jinja2): try the exact key, then match names.
+                entries = legacy_files.get(f"{p['name']} {p.get('version')}")
+                if entries is None:
+                    target_name = canonicalize_name(p["name"])
+                    target_version = p.get("version")
+                    for key, value in legacy_files.items():
+                        key_name, _, key_version = key.rpartition(" ")
+                        if key_version == target_version and canonicalize_name(key_name) == target_name:
+                            entries = value
+                            break
+            if entries is not None:
+                pkg.files = [f for f in (_filename(e) for e in entries) if f]
+            # Not in either place: leave files as None so the PyPI lookup fills them in.
         _add_once(pkgs, seen, pkg)
     return Source(path.name, pkgs)
 
