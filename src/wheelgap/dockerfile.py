@@ -28,7 +28,7 @@ IMAGE_NAMES = ("python", "library/python", "docker.io/library/python", "docker.i
 UV_IMAGE = "ghcr.io/astral-sh/uv"
 UV_ARCHES = {"x86_64", "aarch64"}
 
-_TAG_RE = re.compile(r"^(\d+)\.(\d+)(?:\.\d+)?(?:(?:a|b|rc)\d+)?(?:-(.+))?$")
+_TAG_RE = re.compile(r"^(\d+)\.(\d+)(?:\.\d+)?(?:(?:a|b|rc)\d+)?(?:-(.+))?$", re.ASCII)
 _UV_TAG_PREFIX_RE = re.compile(r"^(?:\d+\.\d+(?:\.\d+)?-)?python")
 
 
@@ -222,7 +222,10 @@ def parse_image(image: str, platform: str | None = None) -> ImageTarget:
         raise DockerfileError(f"{image}: build arguments are not supported, pass -p/-t instead")
     image = image.split("@", 1)[0]
     name, _, tag = image.rpartition(":") if ":" in image.rsplit("/", 1)[-1] else (image, "", "")
-    name = name.lower()
+    if name != name.lower():
+        raise DockerfileError(f"{image}: image repository name must be lowercase")
+    if not tag.isascii():
+        raise DockerfileError(f"{image}: image tags must contain ASCII characters only")
     if name not in IMAGE_NAMES and name != UV_IMAGE:
         raise DockerfileError(
             f"{image}: only the official python images and Python-tagged Astral uv images are supported, "

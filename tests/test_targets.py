@@ -37,6 +37,12 @@ def test_parse_python_rejects_garbage():
         parse_python("latest")
 
 
+@pytest.mark.parametrize("spec", ["3.1٣", "٣.13", "cp3１３", "3.١٤t"])
+def test_parse_python_rejects_non_ascii_digits(spec):
+    with pytest.raises(TargetError):
+        parse_python(spec)
+
+
 @pytest.mark.parametrize(
     "alias,expected",
     [

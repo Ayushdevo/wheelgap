@@ -64,6 +64,26 @@ def test_parse_from_errors(line, message):
         parse_from(line)
 
 
+@pytest.mark.parametrize(
+    "image",
+    [
+        "PYTHON:3.13",
+        "library/Python:3.13",
+        "docker.io/library/PYTHON:3.13",
+        "ghcr.io/astral-sh/UV:python3.13",
+        "python:3.1٣",
+        "python:٣.13",
+        "python:3.13.١",
+        "python:3.15.0a١",
+        "python:3.13-alpine3.١٢",
+        "ghcr.io/astral-sh/uv:0.١٣-python3.13-alpine",
+    ],
+)
+def test_dockerfile_rejects_invalid_image_names_and_digits(tmp_path, image):
+    with pytest.raises(DockerfileError):
+        read_dockerfile(_dockerfile(tmp_path, f"FROM {image}\n"))
+
+
 def test_last_from_takes_the_final_stage():
     text = (
         "# syntax=docker/dockerfile:1\n"
