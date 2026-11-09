@@ -163,6 +163,38 @@ def test_bad_requirement():
         load_inputs(["not a valid ! spec"])
 
 
+def test_pdm_lock_extras_variants_count_once(tmp_path):
+    # PDM writes one entry per extras variant (seen in PDM's own lockfile for coverage[toml]).
+    (tmp_path / "pdm.lock").write_text(
+        '[[package]]\nname = "coverage"\nversion = "7.13.5"\nmarker = "sys_platform == \'linux\'"\n'
+        'files = [{file = "coverage-7.13.5.tar.gz", hash = "sha256:00"}]\n\n'
+        '[[package]]\nname = "coverage"\nversion = "7.13.5"\nextras = ["toml"]\n'
+        'files = [{file = "coverage-7.13.5.tar.gz", hash = "sha256:00"}]\n',
+        encoding="utf-8",
+    )
+    (src,) = load_inputs([str(tmp_path)])
+    assert [(p.name, p.version) for p in src.packages] == [("coverage", "7.13.5")]
+    assert src.packages[0].markers is None  # the unconditional variant wins
+
+
+def test_requirements_bare_vcs_urls_are_skipped(tmp_path):
+    path = tmp_path / "requirements.txt"
+    path.write_text(
+        "git+ssh://git@github.com/org/repo.git#egg=foo\n"  # the "@" in git@ used to abort the whole run
+        "hg+https://hg.example.com/bar#egg=bar&subdirectory=src\n"
+        "https://example.com/pkgs/baz-1.0.tar.gz\n"
+        "named @ git+https://github.com/org/named.git\n"
+        "requests==2.32.3\n",
+        encoding="utf-8",
+    )
+    (src,) = load_inputs([str(path)])
+    got = {p.name: (p.skip, p.version) for p in src.packages}
+    assert got["foo"] == ("url", None) and got["bar"] == ("url", None)
+    assert got["https://example.com/pkgs/baz-1.0.tar.gz"] == ("url", None)
+    assert got["named"] == ("url", None)
+    assert got["requests"] == (None, "2.32.3")
+
+
 def test_pipfile_lock_vcs_skipped(tmp_path):
     path = tmp_path / "Pipfile.lock"
     lock = {

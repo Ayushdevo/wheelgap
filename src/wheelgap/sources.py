@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -146,9 +147,25 @@ def parse_poetry_lock(path: Path) -> Source:
     return Source(path.name, pkgs)
 
 
+def _add_once(pkgs: list[Package], seen: dict[tuple[str, str | None], Package], pkg: Package) -> None:
+    """Append `pkg` unless the same name and version is already there; then widen that entry's markers.
+
+    Pipenv lists a package used by both default and develop in both, and PDM writes one entry per
+    extras variant (`coverage` and `coverage[toml]`). Either way it's one install, needed if any entry is.
+    """
+    key = (pkg.key, pkg.version)
+    first = seen.get(key)
+    if first is None:
+        seen[key] = pkg
+        pkgs.append(pkg)
+    elif first.markers is not None:
+        first.markers = None if pkg.markers is None else first.markers + pkg.markers
+
+
 def parse_pdm_lock(path: Path) -> Source:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
-    pkgs = []
+    pkgs: list[Package] = []
+    seen: dict[tuple[str, str | None], Package] = {}
     for p in data.get("package", []):
         pkg = Package(p["name"], p.get("version"), origin=path.name)
         if p.get("marker"):
@@ -159,13 +176,13 @@ def parse_pdm_lock(path: Path) -> Source:
         elif "files" in p:
             pkg.files = [f for f in (_filename(e) for e in p["files"]) if f]
         # No files list at all: leave files as None so the PyPI lookup fills them in.
-        pkgs.append(pkg)
+        _add_once(pkgs, seen, pkg)
     return Source(path.name, pkgs)
 
 
 def parse_pipfile_lock(path: Path) -> Source:
     data = json.loads(path.read_text(encoding="utf-8"))
-    pkgs = []
+    pkgs: list[Package] = []
     seen: dict[tuple[str, str | None], Package] = {}
     for section in ("default", "develop"):
         for name, p in data.get(section, {}).items():
@@ -176,15 +193,7 @@ def parse_pipfile_lock(path: Path) -> Source:
             pkg.skip = next((kind for kind in ("git", "hg", "svn", "bzr", "path", "file") if kind in p), None)
             if pkg.skip is None and p.get("editable"):
                 pkg.skip = "editable"
-            key = (canonicalize_name(name), pkg.version)
-            if key in seen:
-                # Pipenv lists a package used by both sections in both; keep one, needed if either entry is.
-                first = seen[key]
-                if first.markers is not None:
-                    first.markers = None if pkg.markers is None else first.markers + pkg.markers
-                continue
-            seen[key] = pkg
-            pkgs.append(pkg)
+            _add_once(pkgs, seen, pkg)
     return Source(path.name, pkgs)
 
 
@@ -204,6 +213,9 @@ def requirement_to_package(text: str, origin: str) -> Package:
     if req.url:
         return Package(req.name, None, skip="url", origin=origin, markers=markers)
     return Package(req.name, _pinned_version(req), origin=origin, markers=markers)
+
+
+_NAMED_URL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\s*(\[[^\]]*\])?\s*@\s")
 
 
 def parse_requirements(path: Path, _seen: set[Path] | None = None) -> Source:
@@ -232,8 +244,11 @@ def parse_requirements(path: Path, _seen: set[Path] | None = None) -> Source:
         if line.startswith((".", "/")):
             pkgs.append(Package(line, None, skip="path", origin=path.name))
             continue
-        if "://" in line and "@" not in line:
-            pkgs.append(Package(line, None, skip="url", origin=path.name))
+        if "://" in line and not _NAMED_URL_RE.match(line):
+            # A bare URL (git+ssh://git@github.com/org/repo.git#egg=foo): never from the index.
+            # "name @ url" lines are left to Requirement, which knows the name and markers.
+            name = line.split("#egg=", 1)[1].split("&")[0] if "#egg=" in line else line
+            pkgs.append(Package(name, None, skip="url", origin=path.name))
             continue
         pkgs.append(requirement_to_package(line, path.name))
     return Source(path.name, pkgs)
