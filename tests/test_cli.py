@@ -115,6 +115,20 @@ def test_pdm_lock_json(capsys, fixtures, fake_pypi, input_name):
     assert not fake_pypi
 
 
+def test_pdm_lock_entry_without_files_is_looked_up(capsys, fake_pypi, tmp_path):
+    (tmp_path / "pdm.lock").write_text(
+        '[[package]]\nname = "purewheel"\nversion = "3.1"\n\n'
+        '[[package]]\nname = "nowheels"\nversion = "0.9"\nfiles = []\n',
+        encoding="utf-8",
+    )
+    code, out, _ = run(capsys, str(tmp_path), "-p", "3.13", "-t", "linux-x86_64", "--json")
+    packages = {p["name"]: p for p in json.loads(out)["packages"]}
+    assert packages["purewheel"]["results"] == {"linux-x86_64": "wheel"}  # filled in from PyPI
+    assert packages["nowheels"]["results"] == {"linux-x86_64": "missing"}  # an empty list is taken as recorded
+    assert fake_pypi == ["https://pypi.org/pypi/purewheel/3.1/json"]
+    assert code == 1
+
+
 def test_pdm_lock_marker_on_older_python(capsys, fixtures, fake_pypi):
     code, out, err = run(capsys, str(fixtures / "pdmproj"), "-p", "3.12", "-t", "linux-x86_64", "--json")
     assert code == 1

@@ -151,8 +151,9 @@ def parse_pdm_lock(path: Path) -> Source:
         src_type = next((k for k in ("git", "path", "url", "file") if k in p), None)
         if src_type:
             pkg.skip = src_type
-        else:
-            pkg.files = [f for f in (_filename(e) for e in p.get("files", [])) if f]
+        elif "files" in p:
+            pkg.files = [f for f in (_filename(e) for e in p["files"]) if f]
+        # No files list at all: leave files as None so the PyPI lookup fills them in.
         pkgs.append(pkg)
     return Source(path.name, pkgs)
 
