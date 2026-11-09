@@ -20,6 +20,14 @@ from wheelgap.dockerfile import DockerfileError, ImageTarget, last_from, parse_f
         ("python:3.13-slim@sha256:" + "0" * 64, ImageTarget("3.13", "linux-x86_64")),
         ("python:3.15.0a1-slim", ImageTarget("3.15", "linux-x86_64")),
         ("python:3.13-windowsservercore-ltsc2022", ImageTarget("3.13", "win-amd64")),
+        ("ghcr.io/astral-sh/uv:python3.13-bookworm-slim", ImageTarget("3.13", "linux-x86_64", glibc="2.36")),
+        ("ghcr.io/astral-sh/uv:python3.14-trixie-slim", ImageTarget("3.14", "linux-x86_64", glibc="2.41")),
+        ("ghcr.io/astral-sh/uv:0.13.7-python3.13-trixie-slim", ImageTarget("3.13", "linux-x86_64", glibc="2.41")),
+        ("ghcr.io/astral-sh/uv:0.13-python3.13-trixie-slim", ImageTarget("3.13", "linux-x86_64", glibc="2.41")),
+        (
+            "--platform=linux/arm64 ghcr.io/astral-sh/uv:python3.12-alpine3.23",
+            ImageTarget("3.12", "musl-aarch64", musl="1.2"),
+        ),
     ],
 )
 def test_parse_from(line, expected):
@@ -32,6 +40,9 @@ def test_parse_from(line, expected):
         ("ubuntu:24.04", "only the official python images"),
         ("python", "must start with a Python version"),
         ("python:latest", "must start with a Python version"),
+        ("ghcr.io/astral-sh/uv:bookworm-slim", r"must specify a Python version like python3\.13-alpine"),
+        ("ghcr.io/astral-sh/uv:3.13-alpine", r"must specify a Python version like python3\.13-alpine"),
+        ("ghcr.io/astral-sh/uv:0.13.7-alpine", r"must specify a Python version like python3\.13-alpine"),
         ("python:${PY}-slim", "build arguments"),
         ("--platform=$BUILDPLATFORM python:3.13", "build arguments"),
         ("--platform=linux/s390x python:3.13", "only linux/amd64"),
@@ -64,12 +75,14 @@ def test_no_from(tmp_path):
         read_dockerfile(path)
 
 
-def test_cli_dockerfile(capsys, fixtures, tmp_path):
+@pytest.mark.parametrize("image", ["python:3.13-alpine", "ghcr.io/astral-sh/uv:python3.13-alpine"])
+def test_cli_dockerfile(capsys, fixtures, tmp_path, image):
     dockerfile = tmp_path / "Dockerfile"
-    dockerfile.write_text("FROM python:3.13-alpine\n")
+    dockerfile.write_text(f"FROM {image}\n")
     code = main([str(fixtures / "uvproj"), "--dockerfile", str(dockerfile), "--json"])
-    data = json.loads(capsys.readouterr().out)
-    assert code in (0, 1)
+    captured = capsys.readouterr()
+    assert code in (0, 1), captured.err
+    data = json.loads(captured.out)
     assert [(t["python"], t["platform"]) for t in data["targets"]] == [("3.13", "musl-x86_64")]
 
 

@@ -1,4 +1,4 @@
-"""Turn the last FROM line of a Dockerfile into a wheelgap target (official `python` images only)."""
+"""Turn the last FROM line of a Dockerfile into a wheelgap target."""
 
 from __future__ import annotations
 
@@ -19,8 +19,10 @@ ARCHES = {
 }
 WINDOWS_VARIANTS = ("windowsservercore", "nanoserver")
 IMAGE_NAMES = ("python", "library/python", "docker.io/library/python", "docker.io/python")
+UV_IMAGE = "ghcr.io/astral-sh/uv"
 
 _TAG_RE = re.compile(r"^(\d+)\.(\d+)(?:\.\d+)?(?:(?:a|b|rc)\d+)?(?:-(.+))?$")
+_UV_TAG_PREFIX_RE = re.compile(r"^(?:\d+\.\d+(?:\.\d+)?-)?python")
 
 
 class DockerfileError(ValueError):
@@ -68,10 +70,19 @@ def parse_image(image: str, platform: str | None = None) -> ImageTarget:
         raise DockerfileError(f"{image}: build arguments are not supported, pass -p/-t instead")
     image = image.split("@", 1)[0]
     name, _, tag = image.rpartition(":") if ":" in image.rsplit("/", 1)[-1] else (image, "", "")
-    if name.lower() not in IMAGE_NAMES:
-        raise DockerfileError(f"{image}: only the official python images are supported, pass -p/-t instead")
+    name = name.lower()
+    if name not in IMAGE_NAMES and name != UV_IMAGE:
+        raise DockerfileError(
+            f"{image}: only the official python images and Python-tagged Astral uv images are supported, "
+            "pass -p/-t instead"
+        )
+    if name == UV_IMAGE:
+        prefix = _UV_TAG_PREFIX_RE.match(tag)
+        tag = tag[prefix.end() :] if prefix else ""
     m = _TAG_RE.match(tag)
     if not m:
+        if name == UV_IMAGE:
+            raise DockerfileError(f"{image}: the tag must specify a Python version like python3.13-alpine")
         raise DockerfileError(f"{image}: the tag must start with a Python version like 3.13")
     python = f"{m.group(1)}.{m.group(2)}"
     variant = (m.group(3) or "").lower().split("-") if m.group(3) else []

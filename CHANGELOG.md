@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `--dockerfile` can infer targets from Astral uv's Python-tagged Debian and Alpine images, including uv version pins. (#15)
+
 - Support `Pipfile.lock` inputs, including default and development dependencies, environment markers, and skipped non-index packages. Packages listed in both sections are checked once. (#30, thanks [@Swarneil1905](https://github.com/Swarneil1905))
 - Accept Docker platform names (`linux/amd64`, `linux/arm64`, `linux/arm64/v8`) with `-t`. (#28, thanks [@jwalith4418-Mj](https://github.com/jwalith4418-Mj))
 - New `--fail-on missing` (or `fail-on = "missing"` in `[tool.wheelgap]`): accept source builds and only fail when a package can't be installed at all. (#22)

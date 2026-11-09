@@ -48,7 +48,8 @@ wheelgap Pipfile.lock -p 3.13 -t linux-x86_64,linux-aarch64
 # No lockfile? Check packages directly (latest version, or pin one)
 wheelgap psycopg2 uvloop numpy==2.3.4 -t windows,win-arm64
 
-# Take the target from your Dockerfile (last FROM line, official python images)
+# Take the target from the last FROM line (e.g. python:3.13-alpine
+# or ghcr.io/astral-sh/uv:0.13.7-python3.13-trixie-slim)
 wheelgap --dockerfile Dockerfile
 
 # Machine-readable, for scripts and CI
