@@ -6,6 +6,7 @@ import pytest
 
 from wheelgap import cli
 from wheelgap.cli import main
+from wheelgap.targets import ALIASES, PLATFORMS
 
 
 def run(capsys, *argv):
@@ -167,8 +168,45 @@ def test_errors_exit_2(capsys, fixtures):
 
 
 def test_list_targets(capsys):
-    code, out, _ = run(capsys, "--list-targets")
-    assert code == 0 and "musl-aarch64" in out
+    code, out, err = run(capsys, "--list-targets")
+    assert code == 0 and not err
+    lines = out.splitlines()
+    assert lines[0].split() == ["name", "aliases", "accepts"]
+    alpine = next(line for line in lines if line.startswith("musl-x86_64 "))
+    assert "alpine" in alpine and "musl <= 1.2" in alpine
+    assert "linux/arm64" in out
+
+
+def test_list_targets_json_includes_every_platform_and_alias(capsys):
+    code, out, err = run(capsys, "--list-targets", "--json")
+    assert code == 0 and not err
+    rows = json.loads(out)
+    assert [row["name"] for row in rows] == list(PLATFORMS)
+    assert {alias: row["name"] for row in rows for alias in row["aliases"]} == ALIASES
+    by_name = {row["name"]: row for row in rows}
+    assert "glibc <= 2.36" in by_name["linux-x86_64"]["accepts"]
+    assert "macOS <= 14.0" in by_name["macos-arm64"]["accepts"]
+    assert by_name["pyodide"]["accepts"] == "pyodide wasm32"
+
+
+def test_list_targets_respects_compatibility_overrides(capsys):
+    flags = ("--list-targets", "--glibc", "2.28", "--musl", "1.1", "--macos", "13.0")
+    code, out, err = run(capsys, *flags)
+    assert code == 0 and not err
+    assert "glibc <= 2.28" in out
+
+    code, out, err = run(capsys, *flags, "--json")
+    assert code == 0 and not err
+    by_name = {row["name"]: row["accepts"] for row in json.loads(out)}
+    assert "glibc <= 2.28" in by_name["linux-aarch64"]
+    assert "musl <= 1.1" in by_name["musl-aarch64"]
+    assert "macOS <= 13.0" in by_name["macos-x86_64"]
+
+
+def test_list_targets_rejects_invalid_compatibility_version(capsys):
+    code, out, err = run(capsys, "--list-targets", "--glibc", "bad")
+    assert code == 2 and not out
+    assert "can't parse glibc version" in err
 
 
 def test_defaults_from_pyproject(capsys, fixtures):

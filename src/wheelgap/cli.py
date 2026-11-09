@@ -17,7 +17,18 @@ from .dockerfile import DockerfileError, read_dockerfile
 from .pyodide import PyodideLock, PyodideLockError, apply_bundled, check_targets, load_pyodide_lock
 from .pypi import fill_all
 from .sources import SourceError, load_inputs
-from .targets import DEFAULT_PLATFORMS, PLATFORMS, Target, TargetError, build_targets
+from .targets import (
+    ALIASES,
+    DEFAULT_GLIBC,
+    DEFAULT_MACOS,
+    DEFAULT_MUSL,
+    DEFAULT_PLATFORMS,
+    PLATFORMS,
+    Target,
+    TargetError,
+    build_targets,
+    parse_version_pair,
+)
 
 EXAMPLES = """\
 examples:
@@ -68,9 +79,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         metavar="PLATFORM",
         help=f"target platform (repeatable, or 'all'; default: {','.join(DEFAULT_PLATFORMS)})",
     )
-    p.add_argument("--glibc", metavar="X.Y", help="glibc version for linux-* targets (default: 2.36)")
-    p.add_argument("--musl", metavar="X.Y", help="musl version for musl-* targets (default: 1.2)")
-    p.add_argument("--macos", metavar="X.Y", help="minimum macOS for macos-* targets (default: 14.0)")
+    p.add_argument("--glibc", metavar="X.Y", help=f"glibc version for linux-* targets (default: {DEFAULT_GLIBC})")
+    p.add_argument("--musl", metavar="X.Y", help=f"musl version for musl-* targets (default: {DEFAULT_MUSL})")
+    p.add_argument("--macos", metavar="X.Y", help=f"minimum macOS for macos-* targets (default: {DEFAULT_MACOS})")
     p.add_argument(
         "--dockerfile",
         metavar="PATH",
@@ -94,7 +105,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="exit 1 on any gap ('source', the default) or only when a package can't install ('missing')",
     )
     p.add_argument("--color", choices=["auto", "always", "never"], default="auto")
-    p.add_argument("--list-targets", action="store_true", help="list platform names and exit")
+    p.add_argument("--list-targets", action="store_true", help="list platforms, aliases and compatibility limits")
     p.add_argument("-V", "--version", action="version", version=f"wheelgap {__version__}")
     return p.parse_args(argv)
 
@@ -314,6 +325,41 @@ def report_json(
     )
 
 
+def print_target_list(args: argparse.Namespace) -> None:
+    aliases: dict[str, list[str]] = {name: [] for name in PLATFORMS}
+    for alias, name in ALIASES.items():
+        aliases[name].append(alias)
+
+    versions = {
+        "manylinux": ("glibc", args.glibc or DEFAULT_GLIBC),
+        "musllinux": ("musl", args.musl or DEFAULT_MUSL),
+        "macos": ("macOS", args.macos or DEFAULT_MACOS),
+    }
+    limits = {}
+    for family, (label, version) in versions.items():
+        major, minor = parse_version_pair(version, label)
+        limits[family] = f", {label} <= {major}.{minor}"
+
+    rows = [
+        (name, aliases[name], f"{family} {arch}{limits.get(family, '')}") for name, (family, arch) in PLATFORMS.items()
+    ]
+    if args.json:
+        print(
+            json.dumps(
+                [{"name": name, "aliases": names, "accepts": accepts} for name, names, accepts in rows], indent=2
+            )
+        )
+        return
+
+    table = [("name", "aliases", "accepts")]
+    table.extend((name, ", ".join(names) or "-", accepts) for name, names, accepts in rows)
+    name_width = max(len(name) for name, _, _ in table)
+    alias_width = max(len(names) for _, names, _ in table)
+    for name, names, accepts in table:
+        print(f"{name:<{name_width}}  {names:<{alias_width}}  {accepts}")
+    print("Docker platform names like linux/arm64 also work.")
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         # Don't crash printing ✓ to a non-UTF-8 pipe (e.g. Windows cp1252).
@@ -321,12 +367,10 @@ def main(argv: list[str] | None = None) -> int:
         if reconfigure:
             reconfigure(errors="replace")
     args = parse_args(argv)
-    if args.list_targets:
-        for name, (family, arch) in PLATFORMS.items():
-            print(f"{name:<14} {family} {arch}")
-        return 0
-
     try:
+        if args.list_targets:
+            print_target_list(args)
+            return 0
         pyproject = find_pyproject(args.inputs)
         config = load_config(pyproject) if pyproject else {}
         if args.dockerfile:
@@ -337,9 +381,9 @@ def main(argv: list[str] | None = None) -> int:
         targets = build_targets(
             args.python or config.get("python") or read_python_version(project_dir(args.inputs)) or [running_python()],
             args.target or config.get("targets", []),
-            args.glibc or config.get("glibc", "2.36"),
-            args.musl or config.get("musl", "1.2"),
-            args.macos or config.get("macos", "14.0"),
+            args.glibc or config.get("glibc", DEFAULT_GLIBC),
+            args.musl or config.get("musl", DEFAULT_MUSL),
+            args.macos or config.get("macos", DEFAULT_MACOS),
         )
         sources = load_inputs(args.inputs or ["."])
         fail_on = args.fail_on or config.get("fail-on", "source")

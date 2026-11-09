@@ -99,6 +99,8 @@ If you think wheelgap got a package wrong, that output (or `--json --explain`) i
 
 ### Targets
 
+Run `wheelgap --list-targets` to see target aliases and compatibility limits, or add `--json` for a machine-readable list.
+
 | name | aliases | wheel tags it accepts |
 | --- | --- | --- |
 | `linux-x86_64` | `linux`, `linux-amd64`, `linux/amd64` | `manylinux_2_*_x86_64` up to `--glibc` (default 2.36), legacy `manylinux2014`/`2010`/`1` |

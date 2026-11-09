@@ -65,6 +65,9 @@ _MARKER_OS = {
 _MARKER_MACHINE = {"win_amd64": "AMD64", "win_arm64": "ARM64"}
 
 DEFAULT_PLATFORMS = ["linux-x86_64", "linux-aarch64", "macos-arm64", "win-amd64"]
+DEFAULT_GLIBC = "2.36"
+DEFAULT_MUSL = "1.2"
+DEFAULT_MACOS = "14.0"
 
 # Legacy manylinux aliases (PEP 513/571/599) and the glibc minor they map to.
 _LEGACY_MANYLINUX = {17: "manylinux2014", 12: "manylinux2010", 5: "manylinux1"}
@@ -210,9 +213,9 @@ class Target:
 def build_targets(
     pythons: list[str],
     platforms: list[str],
-    glibc: str = "2.36",
-    musl: str = "1.2",
-    macos: str = "14.0",
+    glibc: str = DEFAULT_GLIBC,
+    musl: str = DEFAULT_MUSL,
+    macos: str = DEFAULT_MACOS,
 ) -> list[Target]:
     plats: list[str] = []
     for item in platforms:

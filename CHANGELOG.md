@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `--list-targets` now shows platform aliases and compatibility limits, with JSON output available via `--json`. (#33)
+
 ## 0.3.0 (2026-11-09)
 
 Thanks to [@draarivpatel-ui](https://github.com/draarivpatel-ui), [@Daiyuanranfeng](https://github.com/Daiyuanranfeng), [@Swarneil1905](https://github.com/Swarneil1905) and [@jwalith4418-Mj](https://github.com/jwalith4418-Mj), whose first PRs are in this release.
