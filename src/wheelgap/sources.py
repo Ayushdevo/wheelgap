@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,7 +11,7 @@ from urllib.parse import unquote, urlparse
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
-LOCKFILES = ("uv.lock", "pylock.toml", "poetry.lock", "requirements.txt")
+LOCKFILES = ("uv.lock", "pylock.toml", "poetry.lock", "Pipfile.lock", "requirements.txt")
 
 
 class SourceError(ValueError):
@@ -140,6 +141,22 @@ def parse_poetry_lock(path: Path) -> Source:
     return Source(path.name, pkgs)
 
 
+def parse_pipfile_lock(path: Path) -> Source:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    pkgs = []
+    for section in ("default", "develop"):
+        for name, p in data.get(section, {}).items():
+            version = p.get("version")
+            pkg = Package(name, version.removeprefix("==") if version else None, origin=path.name)
+            if p.get("markers"):
+                pkg.markers = [p["markers"]]
+            pkg.skip = next((kind for kind in ("git", "path", "file") if kind in p), None)
+            if pkg.skip is None and p.get("editable"):
+                pkg.skip = "editable"
+            pkgs.append(pkg)
+    return Source(path.name, pkgs)
+
+
 def _pinned_version(req: Requirement) -> str | None:
     specs = list(req.specifier)
     if len(specs) == 1 and specs[0].operator in ("==", "===") and "*" not in specs[0].version:
@@ -195,6 +212,7 @@ PARSERS = {
     "uv.lock": parse_uv_lock,
     "pylock.toml": parse_pylock,
     "poetry.lock": parse_poetry_lock,
+    "Pipfile.lock": parse_pipfile_lock,
 }
 
 
@@ -208,7 +226,9 @@ def load_file(path: Path) -> Source:
         return parse_uv_lock(path)
     if name.endswith((".txt", ".in")):
         return parse_requirements(path)
-    raise SourceError(f"don't know how to read {path} (expected uv.lock, pylock.toml, poetry.lock or requirements.txt)")
+    raise SourceError(
+        f"don't know how to read {path} (expected uv.lock, pylock.toml, poetry.lock, Pipfile.lock or requirements.txt)"
+    )
 
 
 def find_lockfile(directory: Path) -> Path:

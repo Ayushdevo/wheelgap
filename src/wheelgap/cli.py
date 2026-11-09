@@ -45,7 +45,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "inputs",
         nargs="*",
         metavar="INPUT",
-        help="uv.lock, pylock.toml, poetry.lock, requirements.txt, a directory, or package specs (default: .)",
+        help=(
+            "uv.lock, pylock.toml, poetry.lock, Pipfile.lock, requirements.txt, "
+            "a directory, or package specs (default: .)"
+        ),
     )
     p.add_argument(
         "-p",

@@ -74,6 +74,52 @@ def test_adhoc_packages(capsys, fake_pypi):
     assert "nowheels" in out and "0.9" in out
 
 
+@pytest.mark.parametrize("input_name", ["pipenvproj", "pipenvproj/Pipfile.lock"])
+def test_pipfile_lock_json(capsys, fixtures, fake_pypi, input_name):
+    code, out, err = run(
+        capsys, str(fixtures / input_name), "-p", "3.13", "-t", "linux-x86_64,musl-aarch64,win-amd64", "--json"
+    )
+    assert code == 1
+    assert not err
+    data = json.loads(out)
+    assert data["sources"] == ["Pipfile.lock"]
+    packages = {p["name"]: p for p in data["packages"]}
+    assert packages["fastlib"]["version"] == "2.0.0"
+    assert packages["fastlib"]["results"] == {"linux-x86_64": "wheel", "musl-aarch64": "source", "win-amd64": "source"}
+    assert packages["winonly"]["results"] == {"linux-x86_64": "n/a", "musl-aarch64": "n/a", "win-amd64": "wheel"}
+    assert packages["purewheel"]["results"] == {"linux-x86_64": "wheel", "musl-aarch64": "wheel", "win-amd64": "wheel"}
+    assert data["skipped"] == [
+        {"name": "gitdep", "reason": "git"},
+        {"name": "localpkg", "reason": "path"},
+        {"name": "archivepkg", "reason": "file"},
+        {"name": "editablepkg", "reason": "editable"},
+    ]
+    assert sorted(fake_pypi) == [
+        "https://pypi.org/pypi/fastlib/2.0.0/json",
+        "https://pypi.org/pypi/purewheel/3.1/json",
+        "https://pypi.org/pypi/winonly/311/json",
+    ]
+
+
+def test_pipfile_lock_in_current_directory(capsys, fixtures, fake_pypi, monkeypatch):
+    monkeypatch.chdir(fixtures / "pipenvproj")
+    code, out, err = run(capsys, "-p", "3.13", "-t", "linux-x86_64")
+    assert code == 0
+    assert not err
+    assert "skipped 4 non-index packages" in out
+    assert "editablepkg (editable)" in out
+    assert "All 2 packages have a wheel for 1 target." in out
+
+
+def test_malformed_pipfile_lock_exits_2(capsys, tmp_path, fake_pypi):
+    path = tmp_path / "Pipfile.lock"
+    path.write_text("{invalid", encoding="utf-8")
+    code, _, err = run(capsys, str(path))
+    assert code == 2
+    assert "JSONDecodeError" in err
+    assert not fake_pypi
+
+
 def test_errors_exit_2(capsys, fixtures):
     code, _, err = run(capsys, str(fixtures / "empty"))
     assert code == 2 and "no lockfile found" in err

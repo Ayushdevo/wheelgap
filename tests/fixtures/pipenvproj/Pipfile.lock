@@ -1,0 +1,18 @@
+{
+    "_meta": {
+        "pipfile-spec": 6,
+        "requires": {"python_version": "3.13"},
+        "sources": [{"name": "pypi", "url": "https://pypi.org/simple", "verify_ssl": true}]
+    },
+    "default": {
+        "fastlib": {"version": "==2.0.0", "hashes": ["sha256:fixture"], "index": "pypi"},
+        "winonly": {"version": "==311", "markers": "sys_platform == 'win32'"},
+        "gitdep": {"git": "https://example.invalid/gitdep.git", "ref": "main"}
+    },
+    "develop": {
+        "purewheel": {"version": "==3.1", "markers": "python_version >= '3.11'", "editable": false},
+        "localpkg": {"path": "./localpkg", "editable": true},
+        "archivepkg": {"file": "https://example.invalid/archivepkg-1.0.tar.gz"},
+        "editablepkg": {"editable": true}
+    }
+}

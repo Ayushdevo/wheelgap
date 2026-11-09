@@ -28,7 +28,7 @@ pipx run wheelgap
 
 Or install it: `pip install wheelgap`.
 
-Run either one in a project directory. It finds `uv.lock`, `pylock.toml`, `poetry.lock` or `requirements.txt` on its own.
+Run either one in a project directory. It finds `uv.lock`, `pylock.toml`, `poetry.lock`, `Pipfile.lock` or `requirements.txt` on its own.
 
 ## Usage
 
@@ -41,6 +41,9 @@ wheelgap -p 3.14t -t all
 
 # Several Pythons at once, Linux on both architectures
 wheelgap uv.lock -p 3.12,3.13,3.14 -t linux-x86_64,linux-aarch64
+
+# Check a Pipenv project's default and development dependencies
+wheelgap Pipfile.lock -p 3.13 -t linux-x86_64,linux-aarch64
 
 # No lockfile? Check packages directly (latest version, or pin one)
 wheelgap psycopg2 uvloop numpy==2.3.4 -t windows,win-arm64
@@ -124,12 +127,13 @@ repos:
       - id: wheelgap
 ```
 
-The hook runs when `uv.lock`, `poetry.lock`, `pylock.toml` or a `requirements*.txt` file changes. Put your targets in `[tool.wheelgap]` in `pyproject.toml` so the hook checks the right platforms. Pass extra options with `args:`, for example `args: [--fail-on, missing]`.
+The hook runs when `uv.lock`, `poetry.lock`, `pylock.toml`, `Pipfile.lock` or a `requirements*.txt` file changes. Put your targets in `[tool.wheelgap]` in `pyproject.toml` so the hook checks the right platforms. Pass extra options with `args:`, for example `args: [--fail-on, missing]`.
 
 ## How it works
 
 - **Lockfiles are read offline.** `uv.lock`, `pylock.toml` and `poetry.lock` already record every file published for each pinned version. wheelgap parses the wheel filenames' tags with [`packaging`](https://packaging.pypa.io/) and checks them against the exact tag set each target accepts. That is the same logic pip and uv use to pick a wheel.
 - **`requirements.txt` and bare package names** are looked up on the PyPI JSON API. Feed it a fully pinned file (from `uv pip compile`, `pip-compile` or `uv export`): wheelgap checks the lines you give it and doesn't resolve dependencies.
+- **`Pipfile.lock`** reads both `default` and `develop` dependencies and looks up distribution filenames on PyPI for their pinned versions. Environment markers are preserved; Git, path, file and editable dependencies are skipped as non-index packages.
 - **Environment markers are respected.** A `pywin32 ; sys_platform == 'win32'` dependency won't show up as a Linux gap. For `uv.lock` the dependency graph is walked per target, so transitive platform-specific packages are handled too.
 - `--online` re-checks lockfile packages against PyPI. Use it when a project has uploaded new wheels for an existing version since you locked, or if your `uv.lock` was generated with `environments` restrictions.
 
