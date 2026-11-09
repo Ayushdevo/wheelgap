@@ -332,8 +332,9 @@ def _version_tuple(text: str) -> tuple[int, ...]:
 def _add_once(pkgs: list[Package], seen: dict[tuple[str, str | None], Package], pkg: Package) -> None:
     """Append `pkg` unless the same name and version is already there; then widen that entry's markers.
 
-    Pipenv lists a package used by both default and develop in both, and PDM writes one entry per
-    extras variant (`coverage` and `coverage[toml]`). Either way it's one install, needed if any entry is.
+    Pipenv lists a package used by several categories (default, develop, docs...) in each of them, and PDM
+    writes one entry per extras variant (`coverage` and `coverage[toml]`). Either way it's one install,
+    needed if any entry is.
     """
     key = (pkg.key, pkg.version)
     first = seen.get(key)
@@ -380,6 +381,8 @@ def parse_pdm_lock(path: Path) -> Source:
 
 def parse_pipfile_lock(path: Path) -> Source:
     data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise SourceError(f"{path.name}: not a Pipfile.lock (expected a JSON object)")
     pkgs: list[Package] = []
     seen: dict[tuple[str, str | None], Package] = {}
     for key, val in data.items():
@@ -392,6 +395,8 @@ def parse_pipfile_lock(path: Path) -> Source:
             if not isinstance(p, dict):
                 raise SourceError(f"{path.name}: {section}.{name} isn't a package entry")
             version = p.get("version")
+            if version is not None and not isinstance(version, str):
+                raise SourceError(f"{path.name}: {section}.{name} has a version that isn't a string")
             pkg = Package(name, version.removeprefix("==") if version else None, origin=path.name)
             if p.get("markers"):
                 pkg.markers = [p["markers"]]
