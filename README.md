@@ -157,6 +157,10 @@ Sites like [pyreadiness.org](https://pyreadiness.org) and [free-threaded wheels]
 
 Contributions welcome. Issues labelled [good first issue](https://github.com/patrickballard/wheelgap/labels/good%20first%20issue) are a good start, and [CONTRIBUTING.md](CONTRIBUTING.md) has the 3-command dev setup. Questions are welcome in [Discussions](https://github.com/patrickballard/wheelgap/discussions).
 
+## Maintainer
+
+wheelgap is created and maintained by [@patrickballard](https://github.com/patrickballard), with help from [its contributors](https://github.com/patrickballard/wheelgap/graphs/contributors).
+
 ## License
 
 [MIT](LICENSE)

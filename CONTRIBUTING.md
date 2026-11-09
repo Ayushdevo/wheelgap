@@ -2,6 +2,8 @@
 
 Thanks for helping! wheelgap is deliberately small: one job, one dependency (`packaging`). First contributions are very welcome, and nobody expects you to know the codebase.
 
+wheelgap is maintained by [@patrickballard](https://github.com/patrickballard), who reviews and merges pull requests.
+
 ## Setup (3 commands)
 
 You need [uv](https://docs.astral.sh/uv/).
