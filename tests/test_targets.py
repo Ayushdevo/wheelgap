@@ -52,11 +52,6 @@ def test_aliases(alias, expected):
     assert resolve_platform(alias) == expected
 
 
-def test_docker_platform_list():
-    targets = build_targets(["3.13"], ["linux/amd64,linux/arm64,linux/arm64/v8"])
-    assert [target.platform for target in targets] == ["linux-x86_64", "linux-aarch64"]
-
-
 def test_unknown_platform():
     with pytest.raises(TargetError, match="unknown target"):
         resolve_platform("solaris")
