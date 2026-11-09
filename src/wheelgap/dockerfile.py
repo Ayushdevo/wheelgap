@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
 # Debian release in the image tag -> its glibc version.
 DEBIAN_GLIBC = {"bullseye": "2.31", "bookworm": "2.36", "trixie": "2.41"}
@@ -50,6 +53,301 @@ _DIRECTIVES = {"syntax", "escape", "check"}  # the parser directives BuildKit kn
 
 # A Python import, e.g. inside a `RUN <<EOF` heredoc: never a valid FROM instruction.
 _PY_IMPORT_RE = re.compile(r"^from\s+\S+\s+import\s")
+
+# Heredocs, as BuildKit reads them: see _heredocs.
+# Go's unicode.IsSpace. Unlike str.isspace, it doesn't count \x1c-\x1f.
+_GO_SPACES = (
+    "\t\n\v\f\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000"
+)
+_GO_SPACE_BYTES = b"\t\n\v\f\r \x85\xa0"  # unicode.IsSpace on a single byte, as extractBuilderFlags calls it
+# Go's \s is [\t\n\f\r ] (no \v), and its $ is the end of the text: used with fullmatch.
+_HEREDOC_RE = re.compile(r"(\d*)<<(-?)[\t\n\f\r ]*([^<]*)", re.ASCII)
+
+
+class _LexError(Exception):
+    """BuildKit's shell lexer returned an error."""
+
+
+class _ShellLexer:
+    """BuildKit's shell.Lex (shell/lex.go) as the parser uses it: \\ as escape, SkipUnsetEnv, no variables set."""
+
+    def __init__(self, text: str, raw_quotes: bool, raw_escapes: bool) -> None:
+        self.text = text.removeprefix("\ufeff")  # Go's text/scanner skips a leading byte order mark
+        self.pos = 0
+        self.raw_quotes = raw_quotes
+        self.raw_escapes = raw_escapes
+        self.buf = ""  # the word being built: like Go's wordsBuffer, one buffer shared by nested _stop_on calls
+
+    def words(self) -> list[str]:
+        """ProcessWords, raising _LexError where it returns an error."""
+        return self._stop_on("", self.raw_escapes, False)[1]
+
+    def _peek(self) -> str:
+        return self.text[self.pos : self.pos + 1]  # "" at the end, Go's scanner.EOF
+
+    def _next(self) -> str:
+        ch = self._peek()
+        self.pos += len(ch)
+        return ch
+
+    def _stop_on(self, stop: str, raw_escapes: bool, pattern: bool) -> tuple[str, list[str]]:
+        """processStopOn: read up to `stop` (to the end if it's ""), returning the text and its words."""
+        result = ""
+        words: list[str] = []
+        in_word = False
+        self.buf = ""  # this also empties the word of any _stop_on this one is nested in, as in Go
+
+        def add(text: str, raw: bool) -> None:  # wordsStruct's addRawString (raw) and addString
+            nonlocal in_word
+            for ch in [text] if raw else text:
+                if raw or ch not in _GO_SPACES:
+                    self.buf += ch
+                    in_word = True
+                elif in_word and self.buf:
+                    words.append(self.buf)
+                    self.buf = ""
+                    in_word = False
+
+        saved, self.raw_escapes = self.raw_escapes, raw_escapes
+        try:
+            stopped = False
+            while ch := self._peek():
+                if ch == stop:
+                    self._next()
+                    stopped = True
+                    break
+                if ch == "$":
+                    text = self._dollar()
+                    result += text
+                    add(text, raw=False)
+                elif ch in "<'\"":
+                    text = self._heredoc() if ch == "<" else self._quoted(ch, pattern)
+                    result += text
+                    add(text, raw=True)
+                else:
+                    self._next()
+                    if ch == "\\":
+                        if self.raw_escapes:
+                            add(ch, raw=True)
+                            result += ch
+                        ch = self._next()
+                        if not ch:
+                            break
+                        add(ch, raw=True)
+                    else:
+                        add(ch, raw=False)
+                    result += ch
+            if stop and not stopped:
+                raise _LexError(f"unexpected end of statement while looking for matching {stop}")
+        finally:
+            self.raw_escapes = saved
+        if self.buf:
+            words.append(self.buf)
+            self.buf = ""
+        return result, words
+
+    def _quoted(self, quote: str, pattern: bool) -> str:
+        """processSingleQuote and processDoubleQuote."""
+        self._next()
+        result = quote if self.raw_quotes else ""
+        while ch := self._peek():
+            if ch == quote:
+                self._next()
+                return result + ch if self.raw_quotes else result
+            if quote == '"' and ch == "$":
+                result += self._dollar()
+                continue
+            self._next()
+            if quote == "'":
+                result += ch * 2 if pattern and ch == "\\" else ch
+                continue
+            if ch == "\\":
+                after = self._peek()
+                if not after:
+                    continue  # a \ at the end is dropped (then the quote is unterminated)
+                if after in '"$\\':
+                    if self.raw_escapes:
+                        result += ch
+                    ch = self._next()
+                elif self.raw_escapes and (not self.raw_quotes or pattern):
+                    result += ch
+            result += ch
+        raise _LexError(f"unexpected end of statement while looking for matching {quote}")
+
+    def _dollar(self) -> str:
+        """processDollar. No variable is set, so the text comes back as written (but see ${x//a/b})."""
+        self._next()
+        if self._peek() != "{":
+            return "$" + self._name()
+        self._next()
+        ch = self._peek()
+        if not ch:
+            raise _LexError("syntax error: missing '}'")
+        if ch in "{}:":
+            raise _LexError("syntax error: bad substitution")
+        name = self._name()
+        ch = self._next()
+        if ch == "}":
+            return "${" + name + "}"
+        modifier = ch
+        if ch == ":":
+            ch = self._next()
+            modifier += ch
+        if modifier == ch and ch == "/":
+            if self._peek() == "/":
+                self._next()  # ${x//a/b} comes back as ${x/a/b}
+            pattern = self._stop_on("/", True, True)[0]
+            return "${" + name + "/" + pattern + "/" + self._stop_on("}", True, False)[0] + "}"
+        if modifier != ch or (ch and ch in "+-?#%"):
+            raw = bool(ch) and ch in "#%"
+            if raw and modifier != ch:
+                raise _LexError(f"unsupported modifier ({modifier}) in substitution")
+            return "${" + name + modifier + self._stop_on("}", raw, raw)[0] + "}"
+        raise _LexError(f"unsupported modifier ({modifier}) in substitution")
+
+    def _name(self) -> str:
+        """processName: a variable name, a run of digits or one special parameter."""
+        name = ""
+        while ch := self._peek():
+            if not name and ch.isdecimal():
+                while (ch := self._peek()) and ch.isdecimal():
+                    name += self._next()
+                return name
+            if not name and ch in "@*#?-$!0":
+                return self._next()
+            if not (ch.isalpha() or ch.isdecimal() or ch == "_"):
+                break
+            name += self._next()
+        return name
+
+    def _heredoc(self) -> str:
+        """processPossibleHeredoc: `<<` takes the tabs, carriage returns and spaces after it into its word."""
+        self._next()
+        if self._peek() != "<":
+            return "<"
+        self._next()
+        result = "<<"
+        while (ch := self._peek()) and ch in "\t\r ":
+            result += self._next()
+        return result
+
+
+def _args_after_flags(args: str, escape: str) -> str:
+    """What's left of an instruction's args after its --flags (parser/split_command.go, extractBuilderFlags).
+
+    BuildKit reads the UTF-8 bytes, so the byte 0x85 or 0xA0 inside a character (as in U+00E0) counts as a space.
+    """
+    data = args.encode()
+    word = b""  # the flag being read, unquoted: BuildKit stops reading flags at a bare `--`
+    in_word = False
+    quote: int | None = None
+    pos = 0
+    while pos < len(data):
+        ch = data[pos]
+        if not in_word:
+            if ch not in _GO_SPACE_BYTES:
+                if data[pos : pos + 2] != b"--":
+                    return data[pos:].decode(errors="replace")
+                in_word = True
+                continue
+        elif quote is None and ch in _GO_SPACE_BYTES:
+            if word == b"--":
+                return data[pos:].decode(errors="replace")
+            in_word, word = False, b""
+        elif quote is None and ch in b"'\"":
+            quote = ch
+        elif quote is not None and ch == quote:
+            quote = None
+        elif ch == ord(escape) and pos + 1 == len(data):
+            quote = None  # a trailing escape is skipped
+        else:
+            if ch == ord(escape):
+                pos += 1
+            word += data[pos : pos + 1]
+        pos += 1
+    return ""
+
+
+def _split_command(line: str, escape: str) -> tuple[str, str]:
+    """The keyword, lowercased, and the args after any --flags (parser/split_command.go, splitCommand)."""
+    parts = re.split(r"[\t\v\f\r ]+", line.strip(_GO_SPACES), maxsplit=1)
+    # Go's strings.ToLower, for comparing with ASCII keywords: U+0130 and the Kelvin sign also lower to ASCII.
+    keyword = "".join(c.lower() if c.isascii() else {"\u0130": "i", "\u212a": "k"}.get(c, c) for c in parts[0])
+    if len(parts) == 1:
+        return keyword, ""
+    return keyword, _args_after_flags(parts[1], escape).strip(_GO_SPACES)
+
+
+def _not_go_json(text: str) -> NoReturn:
+    raise ValueError(f"Go's encoding/json rejects {text}")
+
+
+def _go_json_number(text: str) -> float:
+    if math.isinf(number := float(text)):
+        raise ValueError(f"Go's encoding/json rejects {text}, which overflows a float64")
+    return number
+
+
+def _is_exec_form(line: str, args: str) -> bool:
+    """Whether BuildKit reads args as a JSON array (parser/line_parsers.go, parseJSON), raising if it rejects them."""
+    args = args.lstrip(_GO_SPACES)
+    if not args.startswith("["):
+        return False
+    try:
+        items = json.loads(args, parse_constant=_not_go_json, parse_int=_go_json_number, parse_float=_go_json_number)
+    except RecursionError:
+        # Arrays nested past Python's limit aren't strings. (Past Go's limit, 10000, they aren't JSON: raise anyway.)
+        items = [[]]
+    except ValueError:
+        return False  # not JSON: shell form
+    if not all(isinstance(item, str) for item in items):
+        raise DockerfileError(f"{line}: Docker rejects a JSON array that isn't all strings")
+    return True
+
+
+def _heredoc_name(line: str, rest: str) -> str | None:
+    """The delimiter for `<<rest`, or None if there's no heredoc (parser/parser.go, heredocFromMatch)."""
+    if not rest:
+        return None
+    try:
+        words = _ShellLexer(rest, raw_quotes=False, raw_escapes=False).words()
+        if len(words) != 1:
+            return None  # <<"" and <<'' (no word) aren't heredocs
+        if len(_ShellLexer(rest, raw_quotes=True, raw_escapes=False).words()) != 1:
+            raise _LexError("internal lexing of heredoc produced inconsistent results")
+    except _LexError as e:
+        raise DockerfileError(f"{line}: Docker can't read the heredoc <<{rest} ({e})") from None
+    return words[0]
+
+
+def _heredocs(instruction: str, escape: str = "\\") -> list[tuple[str, bool]]:
+    """(delimiter, strip_tabs) for each heredoc BuildKit finds in one instruction, with continuations joined.
+
+    Only shell-form RUN, COPY and ADD (and ONBUILD of those) have heredocs. Words are split, and delimiters
+    unquoted, by BuildKit's shell lexer, which always uses \\ as its escape: `escape`, from the `# escape=`
+    directive, is only used to find where the --flags end. Raises DockerfileError where BuildKit rejects the line.
+
+    Follows BuildKit at commit cedaeca8850a2bb536bbd1db72419f3cf491bdb5: canContainHeredoc, heredocsFromLine and
+    heredocFromMatch in parser.go, splitCommand and extractBuilderFlags in split_command.go, parseJSON in
+    line_parsers.go, and the lexer in shell/lex.go:
+    https://github.com/moby/buildkit/blob/cedaeca8850a2bb536bbd1db72419f3cf491bdb5/frontend/dockerfile/parser/parser.go
+    https://github.com/moby/buildkit/blob/cedaeca8850a2bb536bbd1db72419f3cf491bdb5/frontend/dockerfile/shell/lex.go
+    """
+    keyword, args = _split_command(instruction, escape)
+    if keyword == "onbuild" and args:
+        keyword, args = _split_command(args, escape)
+    if keyword not in ("run", "copy", "add") or _is_exec_form(instruction, args) or "<<" not in instruction:
+        return []
+    try:
+        words = _ShellLexer(instruction, raw_quotes=True, raw_escapes=True).words()
+    except _LexError:
+        return []  # heredocsFromLine ignores the error, and has no words
+    docs = []
+    for word in words:
+        if (m := _HEREDOC_RE.fullmatch(word)) and (name := _heredoc_name(instruction, m.group(3))) is not None:
+            docs.append((name, m.group(2) == "-"))
+    return docs
 
 
 def _escape_char(lines: list[str]) -> str:

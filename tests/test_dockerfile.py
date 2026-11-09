@@ -3,7 +3,7 @@ import json
 import pytest
 
 from wheelgap.cli import main
-from wheelgap.dockerfile import DockerfileError, ImageTarget, last_from, parse_from, read_dockerfile
+from wheelgap.dockerfile import DockerfileError, ImageTarget, _heredocs, last_from, parse_from, read_dockerfile
 
 
 @pytest.mark.parametrize(
@@ -188,23 +188,149 @@ def test_scratch_after_stages_keeps_the_usual_error(tmp_path):
         read_dockerfile(_dockerfile(tmp_path, text))
 
 
-@pytest.mark.parametrize(
-    "line",
-    [
-        "RUN echo $((1<<SHIFT))",
-        "RUN echo $((1 << BITS))",
-        'RUN python -c "print(1<<n)"',
-        "CMD cat <<EOF",
-        "ENV X=<<EOF",
-        'LABEL note="a<<b"',
-        'RUN ["sh", "-c", "cat <<EOF"]',
-        "RUN cat <<<word",
-    ],
-)
+_HEREDOC_LIKE_LINES = [
+    "RUN echo $((1<<SHIFT))",
+    'RUN python -c "print(1<<n)"',
+    "CMD cat <<EOF",
+    "ENV X=<<EOF",
+    'LABEL note="a<<b"',
+    'RUN ["sh", "-c", "cat <<EOF"]',
+    "RUN cat <<<word",
+]
+
+
+@pytest.mark.parametrize("line", _HEREDOC_LIKE_LINES)
 def test_lines_with_heredoc_like_text_never_hide_the_final_from(tmp_path, line):
     # wheelgap doesn't parse heredocs, so whatever these mean to Docker, the final FROM is still found.
     text = f"FROM python:3.13-alpine AS base\n{line}\nFROM python:3.12-slim\n"
     assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.12", "linux-x86_64")
+
+
+def _docs(*names):
+    return [(name, False) for name in names]
+
+
+# BuildKit's TestHeredocsFromLine (frontend/dockerfile/parser/parser_heredoc_test.go at cedaeca), less a repeated
+# row. Its loop only checks the heredocs found, so its `RUN <<- EOF` row (expecting EOF) passes with none, and none
+# is right: the lexer splits `<<-` from `EOF`.
+_BUILDKIT_HEREDOCS_FROM_LINE = [
+    ("RUN <<EOF", _docs("EOF")),
+    ("RUN <<-EOF", [("EOF", True)]),
+    ("RUN <<- EOF", []),
+    ("RUN << -EOF", _docs("-EOF")),
+    ("RUN <<'EOF'", _docs("EOF")),
+    ("RUN 4<<EOF", _docs("EOF")),
+    ("RUN <<EOF <<EOF2", _docs("EOF", "EOF2")),
+    ("RUN '<<EOF'", []),
+    ('RUN "<<EOF"', []),
+]
+
+
+@pytest.mark.parametrize(
+    ("instruction", "expected"),
+    [
+        *_BUILDKIT_HEREDOCS_FROM_LINE,
+        ('RUN <<"EOF"', _docs("EOF")),
+        (r"RUN <<\EOF", _docs("EOF")),
+        ('RUN <<E"O"F', _docs("EOF")),
+        ("RUN 2<<EOF", _docs("EOF")),
+        ("COPY <<FILE1 <<FILE2 /dest", _docs("FILE1", "FILE2")),
+        ("run <<EOF", _docs("EOF")),
+        ("RUN << EOF", _docs("EOF")),
+        ("RUN <<\tEOF", _docs("EOF")),
+        ("RUN --mount=type=cache,target=/x <<EOF", _docs("EOF")),
+        ("RUN --mount=type=secret,id=a -- <<EOF", _docs("EOF")),
+        # From BuildKit's TestParseExtractsHeredoc.
+        ("USER <<INVALID", []),
+        ("RUN <<COMPLEX python3", _docs("COMPLEX")),
+        ("COPY <<file.txt /dest", _docs("file.txt")),
+        ("RUN <<eo'f'", _docs("eof")),
+        (r"RUN <<eo\'f", _docs("eo'f")),
+        (r"RUN <<'e'o\'f", _docs("eo'f")),
+        ("RUN <<'one two'", _docs("one two")),
+        ("RUN <<$EOF", _docs("$EOF")),
+        ("RUN <<  EOF  > foo", _docs("EOF")),
+        # `$(` and `$((` are ordinary text to BuildKit.
+        ("RUN echo $((1 << BITS))", _docs("BITS))")),
+        ("RUN x=$(cat <<EOF)", _docs("EOF)")),
+        # ${x:-y} (any ${} with a modifier) empties the word it's in, as BuildKit's shared word buffer does; $$ is a
+        # whole parameter, so the { after it is plain text.
+        ("RUN cat <<EOF${x:-y}", []),
+        ("RUN cat <<EOF$${x:-y}", _docs("EOF$${x:-y}")),
+        ("RUN cat <<EOF${x}", _docs("EOF${x}")),
+        ("RUN cat <<EOF$x", _docs("EOF$x")),
+        ("RUN echo ${x:- <<EOF}", _docs("EOF}")),
+        # Inside double quotes \ escapes only " $ and \, and is kept otherwise; a trailing \ is dropped.
+        ('RUN <<"E\\OF"', _docs("E\\OF")),
+        ('RUN <<"E\\"OF"', _docs('E"OF')),
+        ("RUN <<EOF\\", _docs("EOF")),
+        ("RUN <<EOF\\ ", _docs("EOF ")),
+        # Exec form is only a JSON array of strings.
+        ("RUN [ -f /x ] && cat <<EOF > /y", _docs("EOF")),
+        ("RUN [NaN] <<EOF", _docs("EOF")),
+        ('RUN --mount=type=cache,target=/x ["cat", "<<EOF"]', []),
+        ('RUN -- ["<<EOF"]', []),
+        ('RUN --x=` <<EOF ["a"]', _docs("EOF")),  # ` is plain text in a flag, unless it's the escape char
+        ('COPY ["<<EOF", "/x"]', []),
+        # BuildKit reads the --flags byte by byte: U+2003 isn't a space there, so the flag runs on to `["a"]`.
+        ('RUN --x\u2003<<EOF ["a"]', []),
+        # A lexer error (an unterminated quote, a bad ${}) is ignored, leaving no words.
+        ('RUN cat <<EOF "unterminated', []),
+        ("RUN cat <<'EOF", []),
+        ("RUN cat <<EOF ${x", []),
+        # Words split on Go's unicode.IsSpace (not \x1c-\x1f, unlike str.isspace); `<<` takes only tabs, \r and
+        # spaces after it; the keyword splits off on ASCII whitespace only.
+        ("RUN <<\x1cEOF", _docs("\x1cEOF")),
+        ("RUN <<EOF\u00a0x", _docs("EOF")),
+        ("RUN <<\vEOF", []),
+        ("RUN\v<<EOF", _docs("EOF")),
+        ("RUN\u00a0<<EOF", []),
+        ("RUN <<\ufeffEOF", _docs("EOF")),  # Go's text/scanner skips a leading byte order mark
+        # An empty delimiter is no heredoc.
+        ('RUN <<""', []),
+        ("RUN <<''", []),
+        ("RUN <<''EOF", _docs("EOF")),
+        ("RUN <<", []),
+        # ONBUILD of RUN, COPY or ADD only, with keywords lowercased as Go does: U+0130 lowers to i, U+0131 doesn't.
+        ("ONBUILD RUN <<EOF", _docs("EOF")),
+        ("onbuild copy <<EOF /x", _docs("EOF")),
+        ("ONBUILD CMD <<EOF", []),
+        ("ONBUILD ONBUILD RUN <<EOF", []),
+        ('ONBUILD RUN ["<<EOF"]', []),
+        ("ONBUILD <<EOF", []),
+        ("ONBU\u0130LD RUN <<EOF", _docs("EOF")),
+        ("onbu\u0131ld run <<EOF", []),
+        *[(line, []) for line in _HEREDOC_LIKE_LINES],
+    ],
+)
+def test_heredocs(instruction, expected):
+    assert _heredocs(instruction) == expected
+
+
+@pytest.mark.parametrize(
+    ("instruction", "expected"),
+    [
+        ("RUN <<`EOF`", _docs("`EOF`")),
+        (r"RUN <<\EOF", _docs("EOF")),
+        ('RUN --x=` <<EOF ["a"]', []),  # the escaped space keeps `<<EOF` in the flag, so this is exec form
+    ],
+)
+def test_heredocs_lex_with_backslash_under_a_backtick_escape(instruction, expected):
+    # BuildKit's heredoc lexer always escapes with \; the `# escape=` char only matters to the --flags.
+    assert _heredocs(instruction, "`") == expected
+
+
+@pytest.mark.parametrize(
+    ("instruction", "error"),
+    [
+        ("RUN echo ${x:- <<'E F'}", r"can't read the heredoc <<'E \(unexpected end of statement"),
+        ('RUN ["cat <<EOF", 1]', "JSON array that isn't all strings"),
+        ('ONBUILD RUN ["cat <<EOF", 1]', "JSON array that isn't all strings"),
+    ],
+)
+def test_heredocs_raise_where_buildkit_rejects_the_line(instruction, error):
+    with pytest.raises(DockerfileError, match=error):
+        _heredocs(instruction)
 
 
 def test_unknown_stage_lists_only_earlier_stages(tmp_path):
