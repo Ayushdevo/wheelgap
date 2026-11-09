@@ -53,6 +53,68 @@ def test_clean_exit_0(capsys, fixtures):
     assert "The 1 package has a wheel for 1 target." in out
 
 
+def test_quiet_reports_only_the_gap_summary_and_names(capsys, fixtures):
+    result = run(capsys, str(fixtures / "armgap"), "-p", "3.13", "-t", "musl-aarch64", "--quiet", "--all")
+    assert result == (
+        1,
+        "2 of 2 packages have gaps: 1 will build from source, 1 can't install at all.\ngaps: armlib, newglibc\n",
+        "",
+    )
+
+
+def test_quiet_with_no_gaps_is_silent(capsys, fixtures):
+    assert run(capsys, str(fixtures / "pylockproj"), "-p", "3.13", "-t", "linux-aarch64", "-q") == (0, "", "")
+
+
+def test_quiet_preserves_json_and_exit_status(capsys, fixtures):
+    args = (str(fixtures / "armgap"), "-p", "3.13", "-t", "musl-aarch64", "--json")
+    assert run(capsys, *args, "--quiet") == run(capsys, *args)
+
+
+def test_quiet_preserves_list_targets_output(capsys):
+    assert run(capsys, "--list-targets", "--quiet") == run(capsys, "--list-targets")
+
+
+def test_quiet_still_reports_bad_input(capsys, fixtures):
+    code, out, err = run(capsys, str(fixtures / "empty"), "--quiet")
+    assert code == 2 and not out and "no lockfile found" in err
+
+
+def test_quiet_preserves_fail_on_missing(capsys, fake_pypi):
+    code, out, err = run(capsys, "nowheels", "-p", "3.13", "-t", "linux", "--fail-on", "missing", "--quiet")
+    assert code == 0 and not err
+    summary, names = out.splitlines()
+    assert "will build from source" in summary
+    assert names == "gaps: nowheels"
+
+
+def test_quiet_from_pyproject(capsys, fixtures, tmp_path):
+    (tmp_path / "pylock.toml").write_bytes((fixtures / "pylockproj" / "pylock.toml").read_bytes())
+    (tmp_path / "pyproject.toml").write_text("[tool.wheelgap]\nquiet = true\n", encoding="utf-8")
+    assert run(capsys, str(tmp_path), "-p", "3.13", "-t", "linux-aarch64") == (0, "", "")
+
+
+def test_pyproject_quiet_must_be_boolean(capsys, tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[tool.wheelgap]\nquiet = "true"\n', encoding="utf-8")
+    code, out, err = run(capsys, str(tmp_path))
+    assert code == 2 and not out and "quiet must be a boolean" in err
+
+
+@pytest.mark.parametrize("from_config", [False, True])
+def test_quiet_conflicts_with_explain(capsys, tmp_path, from_config):
+    args = ["--explain"]
+    if from_config:
+        (tmp_path / "pyproject.toml").write_text("[tool.wheelgap]\nquiet = true\n", encoding="utf-8")
+        args.append(str(tmp_path))
+    else:
+        args.append("--quiet")
+    with pytest.raises(SystemExit) as caught:
+        main(args)
+    assert caught.value.code == 2
+    error = capsys.readouterr().err.splitlines()[-1]
+    assert "--quiet" in error and "--explain" in error
+
+
 def test_json(capsys, fixtures):
     code, out, _ = run(capsys, str(fixtures / "uvproj"), "-p", "3.13,3.14t", "-t", "win-amd64", "--json")
     assert code == 1

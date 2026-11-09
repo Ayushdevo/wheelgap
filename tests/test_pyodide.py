@@ -40,6 +40,14 @@ def test_bundled_only_is_a_pass(capsys, fake_pypi, lock):
     assert "has a wheel" in out
 
 
+def test_quiet_omits_pyodide_bundled_details(capsys, fake_pypi, lock):
+    code, out, err = run(
+        capsys, "fastlib==2.0.0", "nowheels==0.9", "-p", "3.13", "-t", "pyodide", "--pyodide-lock", lock, "--quiet"
+    )
+    assert code == 1 and not err
+    assert out == "1 of 2 packages has gaps: 1 can't install at all.\ngaps: nowheels\n"
+
+
 def test_different_bundled_version_is_flagged(capsys, fake_pypi, tmp_path):
     path = tmp_path / "pyodide-lock.json"
     info = {"abi_version": "2025_0", "python": "3.13.2", "version": "0.29.0"}

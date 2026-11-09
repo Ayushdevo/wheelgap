@@ -42,7 +42,7 @@ examples:
 """
 
 
-def parse_args(argv: list[str] | None) -> argparse.Namespace:
+def make_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="wheelgap",
         description="Find the dependencies that have no prebuilt wheel for your target platform, "
@@ -92,7 +92,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--online", action="store_true", help="re-check lockfile packages against PyPI instead of trusting the lockfile"
     )
     p.add_argument("--all", action="store_true", help="show every package, not just the ones with gaps")
-    p.add_argument("--explain", action="store_true", help="for each gap, list the wheels that were rejected and why")
+    detail = p.add_mutually_exclusive_group()
+    detail.add_argument(
+        "--explain", action="store_true", help="for each gap, list the wheels that were rejected and why"
+    )
+    detail.add_argument(
+        "-q", "--quiet", action="store_true", help="print only the gap summary and affected package names"
+    )
     p.add_argument("--json", action="store_true", help="print JSON instead of a table")
     p.add_argument("--exit-zero", action="store_true", help="exit 0 even when gaps are found")
     p.add_argument(
@@ -103,7 +109,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--color", choices=["auto", "always", "never"], default="auto")
     p.add_argument("--list-targets", action="store_true", help="list platforms, aliases and compatibility limits")
     p.add_argument("-V", "--version", action="version", version=f"wheelgap {__version__}")
-    return p.parse_args(argv)
+    return p
 
 
 FAIL_ON = ("source", "missing")
@@ -166,6 +172,9 @@ def load_config(path: Path) -> dict:
                 raise SourceError(f'{path}: [tool.wheelgap] {key} must be a string like "2.31"')
             if key == "fail-on" and value not in FAIL_ON:
                 raise SourceError(f"{path}: [tool.wheelgap] fail-on must be one of: {', '.join(FAIL_ON)}")
+        elif key == "quiet":
+            if not isinstance(value, bool):
+                raise SourceError(f"{path}: [tool.wheelgap] quiet must be a boolean")
         else:
             raise SourceError(f"{path}: unknown key in [tool.wheelgap]: {key}")
         config[key] = value
@@ -363,19 +372,38 @@ def print_target_list(args: argparse.Namespace) -> None:
     print("Docker platform names like linux/arm64 also work.")
 
 
+def gap_summary(gaps: list[Row], total: int, style: Style) -> str:
+    source = sum(any(s is Status.SOURCE for s in r.results.values()) for r in gaps)
+    missing = sum(any(s is Status.MISSING for s in r.results.values()) for r in gaps)
+    parts = []
+    if source:
+        parts.append(style.yellow(f"{source} will build from source"))
+    if missing:
+        parts.append(style.red(f"{missing} can't install at all"))
+    unknown = len(gaps) - source - missing
+    if unknown > 0:
+        parts.append(style.dim(f"{unknown} unknown"))
+    verb = "has" if len(gaps) == 1 else "have"
+    return f"{style.bold(f'{len(gaps)} of {total} packages')} {verb} gaps: " + ", ".join(parts) + "."
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         # Don't crash printing ✓ to a non-UTF-8 pipe (e.g. Windows cp1252).
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure:
             reconfigure(errors="replace")
-    args = parse_args(argv)
+    parser = make_parser()
+    args = parser.parse_args(argv)
     try:
         if args.list_targets:
             print_target_list(args)
             return 0
         pyproject = find_pyproject(args.inputs)
         config = load_config(pyproject) if pyproject else {}
+        quiet = args.quiet or config.get("quiet", False)
+        if quiet and args.explain:
+            parser.error("--explain cannot be used with quiet mode (--quiet or quiet = true)")
         if args.dockerfile:
             # The image beats pyproject.toml; flags still win.
             image = read_dockerfile(Path(args.dockerfile))
@@ -419,6 +447,12 @@ def main(argv: list[str] | None = None) -> int:
         return code
 
     style = Style(use_color(args.color))
+    if quiet:
+        if gaps:
+            print(gap_summary(gaps, len(rows), style))
+            print("gaps: " + ", ".join(r.package.name for r in gaps))
+        return code
+
     pys = ", ".join(dict.fromkeys(t.python for t in targets))
     n_pkgs = f"{len(rows)} package{'s' * (len(rows) != 1)}"
     print(style.dim(f"wheelgap {__version__} · {' + '.join(source_labels)} · {n_pkgs} · Python {pys}"))
@@ -457,18 +491,7 @@ def main(argv: list[str] | None = None) -> int:
         print(style.green(f"✓ {what} a wheel for {'every one of ' if n_t > 1 else ''}{n_t} target{'s' * (n_t > 1)}."))
         return 0
 
-    source = sum(any(s is Status.SOURCE for s in r.results.values()) for r in gaps)
-    missing = sum(any(s is Status.MISSING for s in r.results.values()) for r in gaps)
-    parts = []
-    if source:
-        parts.append(style.yellow(f"{source} will build from source"))
-    if missing:
-        parts.append(style.red(f"{missing} can't install at all"))
-    unknown = len(gaps) - source - missing
-    if unknown > 0:
-        parts.append(style.dim(f"{unknown} unknown"))
-    verb = "has" if len(gaps) == 1 else "have"
-    print(f"{style.bold(f'{len(gaps)} of {len(rows)} packages')} {verb} gaps: " + ", ".join(parts) + ".")
+    print(gap_summary(gaps, len(rows), style))
     if not args.explain:
         print(style.dim("Run with --explain to see which wheels were rejected and why."))
     if gaps and not failing and not args.exit_zero:
