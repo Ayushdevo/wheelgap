@@ -34,6 +34,8 @@ Run either one in a project directory. It finds `uv.lock`, `pylock.toml`, `poetr
 
 ## Usage
 
+See the [recipes](docs/recipes.md) for a free-threading readiness report you can use in scripts.
+
 ```bash
 # Will my Alpine ARM image compile anything?
 wheelgap -p 3.13 -t alpine-arm64
