@@ -630,3 +630,159 @@ def test_quiet_still_prints_the_lock_note_when_the_answer_may_be_wrong(capsys, t
     (tmp_path / "uv.lock").write_text(other, encoding="utf-8")
     _, _, err = run(capsys, str(tmp_path), "-p", "3.13", "-t", "linux-x86_64", "-q")
     assert "from other indexes may show false gaps" in err
+
+
+@pytest.mark.parametrize("color", ["never", "always"])
+def test_ignore_known_gap_text(capsys, fixtures, color):
+    code, out, err = run(
+        capsys,
+        str(fixtures / "armgap"),
+        "-p",
+        "3.13",
+        "-t",
+        "linux-aarch64",
+        "--ignore",
+        "NewGlibc",
+        "--all",
+        "--explain",
+        "--color",
+        color,
+    )
+    assert code == 0 and not err
+    assert "The 1 package has a wheel for 1 target." in out
+    assert "armlib" in out
+    assert out.count("newglibc") == 1  # only the disclosure, never a table or explanation row
+    assert "ignored: newglibc" in out
+    if color == "always":
+        assert "\033[2mignored: newglibc\033[0m" in out
+
+
+def test_ignore_known_gap_json(capsys, fixtures):
+    code, out, err = run(
+        capsys,
+        str(fixtures / "armgap"),
+        "-p",
+        "3.13",
+        "-t",
+        "linux-aarch64",
+        "--ignore",
+        "NewGlibc",
+        "--json",
+        "--explain",
+    )
+    data = json.loads(out)
+    assert code == 0 and not err
+    assert data["ignored"] == ["newglibc"]
+    assert data["summary"] == {"packages": 1, "with_gaps": 0}
+    assert [p["name"] for p in data["packages"]] == ["armlib"]
+
+
+def test_ignore_known_gap_markdown(capsys, fixtures):
+    code, out, err = run(
+        capsys,
+        str(fixtures / "armgap"),
+        "-p",
+        "3.13",
+        "-t",
+        "linux-aarch64",
+        "--ignore",
+        "NewGlibc",
+        "--markdown",
+        "--all",
+        "--explain",
+    )
+    assert code == 0 and not err
+    assert "Ignored: `newglibc`" in out
+    assert out.count("newglibc") == 1
+    assert "| armlib |" in out
+    assert "1 package · Python 3.13" in out
+    assert "every package has a wheel" in out
+
+
+def test_ignore_repeated_comma_separated_and_duplicate_names(capsys, fixtures):
+    code, out, err = run(
+        capsys,
+        str(fixtures / "armgap"),
+        "-p",
+        "3.13",
+        "-t",
+        "musl-aarch64",
+        "--ignore",
+        "NewGlibc, ArmLib",
+        "--ignore",
+        "NEWGLIBC,not-installed",
+        "--json",
+    )
+    data = json.loads(out)
+    assert code == 0 and not err
+    assert data["ignored"] == ["armlib", "newglibc"]
+    assert data["packages"] == []
+    assert data["summary"] == {"packages": 0, "with_gaps": 0}
+
+
+def test_ignore_canonicalizes_punctuation(capsys, fixtures, tmp_path):
+    lock = (fixtures / "armgap" / "uv.lock").read_text().replace("newglibc", "new_glibc_core")
+    (tmp_path / "uv.lock").write_text(lock)
+    code, out, err = run(
+        capsys,
+        str(tmp_path),
+        "-p",
+        "3.13",
+        "-t",
+        "linux-aarch64",
+        "--ignore",
+        "NEW.GLIBC--CORE",
+        "--json",
+    )
+    data = json.loads(out)
+    assert code == 0 and not err
+    assert data["ignored"] == ["new_glibc_core"]  # reported as the lockfile names it
+    assert [p["name"] for p in data["packages"]] == ["armlib"]
+
+
+def test_ignore_does_not_hide_other_gaps(capsys, fixtures):
+    code, out, err = run(
+        capsys,
+        str(fixtures / "armgap"),
+        "-p",
+        "3.13",
+        "-t",
+        "musl-aarch64",
+        "--ignore",
+        "NewGlibc",
+        "--json",
+    )
+    data = json.loads(out)
+    assert code == 1 and not err
+    assert data["ignored"] == ["newglibc"]
+    assert data["summary"] == {"packages": 1, "with_gaps": 1}
+    assert data["packages"][0]["results"] == {"musl-aarch64": "source"}
+
+
+def test_ignore_is_disclosed_in_quiet_output(capsys, fixtures):
+    assert run(
+        capsys,
+        str(fixtures / "armgap"),
+        "-p",
+        "3.13",
+        "-t",
+        "linux-aarch64",
+        "--ignore",
+        "NewGlibc",
+        "--quiet",
+    ) == (0, "ignored: newglibc\n", "")
+
+
+@pytest.mark.parametrize("output", ["--json", "--markdown", "--color=never"])
+def test_no_ignore_keeps_gaps(capsys, fixtures, output):
+    code, out, err = run(capsys, str(fixtures / "armgap"), "-p", "3.13", "-t", "linux-aarch64", output)
+    assert code == 1 and not err
+    if output == "--json":
+        data = json.loads(out)
+        assert data["ignored"] == []
+        assert data["summary"] == {"packages": 2, "with_gaps": 1}
+        assert [p["name"] for p in data["packages"]] == ["armlib", "newglibc"]
+    else:
+        assert "1 of 2 packages has gaps" in out
+        assert "newglibc" in out
+        assert "ignored" not in out.lower()

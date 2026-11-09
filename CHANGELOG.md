@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `--ignore NAME` accepts known package gaps without failing CI, and lists ignored packages in text, JSON and Markdown reports. Repeat the flag or separate names with commas. (#119, thanks [@moelomda](https://github.com/moelomda))
+
 ## 0.6.3 (2026-11-09)
 
 `--dockerfile` now reads Dockerfiles the way Docker does, down to whitespace, line endings, tags and stage names, so it errors where Docker would instead of guessing. The coverage scanner adds Python 3.15 and 3.15t, and `--list-targets` shows the glibc 2.17 manylinux floor outside x86.
