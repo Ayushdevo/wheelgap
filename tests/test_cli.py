@@ -1398,3 +1398,63 @@ def test_ignore_unmatched_does_not_change_exit_code(capsys, fixtures):
     code_unmatched, _, err = run(capsys, *args, "--ignore", "nosuchpkg")
     assert "matches no package: nosuchpkg" in err
     assert code_unmatched == code_plain == 1
+
+
+def test_target_scoped_ignore_keeps_other_targets_enforced(capsys, fixtures):
+    args = [str(fixtures / "armgap"), "-p", "3.13", "-t", "linux-aarch64,musl-aarch64", "--json", "--offline"]
+    code, out, err = run(capsys, *args, "--ignore", "NewGlibc:linux/arm64")
+    assert code == 1
+    data = json.loads(out)
+    assert data["ignored"] == []
+    assert data["ignored_targets"] == {"newglibc": ["linux-aarch64"]}
+    assert data["packages"][1]["results"] == {"linux-aarch64": "ignored", "musl-aarch64": "missing"}
+    assert data["summary"]["with_gaps"] == 2
+    assert not err
+
+
+@pytest.mark.parametrize("mode", [[], ["--quiet"], ["--markdown"]])
+def test_target_scoped_ignore_reports_accepted_gap(capsys, fixtures, mode):
+    code, out, err = run(
+        capsys,
+        str(fixtures / "armgap"),
+        "-p",
+        "3.13",
+        "-t",
+        "linux-aarch64,musl-aarch64",
+        "--glibc",
+        "2.39",
+        "--ignore",
+        "armlib:musl-aarch64,newglibc:musl-aarch64",
+        *mode,
+    )
+    assert code == 0
+    assert "ignored:" in out.lower()
+    assert "armlib" in out and "newglibc" in out and "musl-aarch64" in out
+    assert "every package has a wheel" not in out
+    assert not err
+
+
+def test_target_scoped_ignore_from_config_and_cli_override(capsys, fixtures, tmp_path):
+    from shutil import copyfile
+
+    copyfile(fixtures / "armgap" / "uv.lock", tmp_path / "uv.lock")
+    (tmp_path / "pyproject.toml").write_text('[tool.wheelgap]\nignore = ["newglibc:linux-aarch64"]\n', encoding="utf-8")
+    args = [str(tmp_path), "-p", "3.13", "-t", "linux-aarch64", "--json"]
+    code, out, _ = run(capsys, *args)
+    assert code == 0
+    assert json.loads(out)["ignored_targets"] == {"newglibc": ["linux-aarch64"]}
+    code, out, _ = run(capsys, *args, "--ignore", "")
+    assert code == 1
+    assert "ignored_targets" not in json.loads(out)
+    code, out, _ = run(capsys, *args, "--ignore", "newglibc:linux-aarch64,newglibc")
+    assert code == 0
+    assert json.loads(out)["ignored"] == ["newglibc"]
+    assert "ignored_targets" not in json.loads(out)
+
+
+@pytest.mark.parametrize("rule", ["newglibc:made-up", "newglibc:", ":linux"])
+def test_invalid_target_scoped_ignore_returns_input_error(capsys, fixtures, rule):
+    code, out, err = run(capsys, str(fixtures / "armgap"), "-p", "3.13", "--json", "--ignore", rule)
+    assert code == 2
+    assert json.loads(out)["error"]["type"] == "TargetError"
+    assert "wheelgap: error" in err

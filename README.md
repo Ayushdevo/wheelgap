@@ -151,6 +151,8 @@ If an input can't be read (a missing lockfile, an unknown target, a bad `[tool.w
 
 Use `--ignore psycopg2` for accepted gaps (repeatable or comma-separated, with case-insensitive package-name matching and equivalent hyphens, underscores and dots): matched packages are excluded from the table, counts and exit status, and listed as ignored in text (including quiet mode), JSON and Markdown. Set `ignore = ["psycopg2"]` in `[tool.wheelgap]` to use it by default; any `--ignore` flags replace the configured list rather than adding to it, and `--ignore ""` clears it for one run.
 
+Use `--ignore psycopg2:alpine` to accept gaps for a package on one target while continuing to check it on the others. The same syntax works in `ignore = [...]`. JSON marks accepted cells as `"ignored"` and lists their target labels in `ignored_targets`.
+
 Use `-q` / `--quiet` (or `quiet = true` in `[tool.wheelgap]`) to show only the gap summary and package names. Clean runs without ignored packages are silent, JSON and Markdown output are unchanged, and quiet text output cannot be combined with `--explain` (`--json --explain` and `--markdown --explain` work).
 
 ### Targets

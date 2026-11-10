@@ -44,6 +44,7 @@ from .targets import (
     parse_version_pair,
     resolve_distro,
     resolve_platform,
+    resolve_platforms,
     single_python,
 )
 
@@ -155,7 +156,7 @@ def make_parser() -> argparse.ArgumentParser:
         "--ignore",
         action="append",
         default=[],
-        metavar="NAME",
+        metavar="NAME[:TARGET]",
         help="ignore known package gaps (repeatable, comma-separated); list ignored names in the report",
     )
     p.add_argument("--exit-zero", action="store_true", help="exit 0 even when gaps are found")
@@ -320,8 +321,46 @@ CELL = {
     Status.MISSING: ("✗ missing", "red"),
     Status.UNKNOWN: ("? unknown", "dim"),
     Status.NOT_NEEDED: ("–", "dim"),
+    Status.IGNORED: ("ignored", "dim"),
     Status.BUNDLED: ("✓ bundled", "green"),
 }
+
+
+def parse_ignores(items: list[str]) -> tuple[set[str], dict[str, set[str]]]:
+    whole: set[str] = set()
+    scoped: dict[str, set[str]] = {}
+    for item in items:
+        for rule in item.split(","):
+            name, sep, selector = (part.strip() for part in rule.partition(":"))
+            if not sep and not name:
+                continue  # --ignore "" clears the configured list
+            if not name or (sep and not selector):
+                raise TargetError(f"invalid --ignore rule {rule!r}; use NAME or NAME:TARGET")
+            key = canonicalize_name(name)
+            if sep:
+                scoped.setdefault(key, set()).update(resolve_platforms([selector]))
+            else:
+                whole.add(key)
+    return whole, scoped
+
+
+def apply_scoped_ignores(rows: list[Row], targets: list[Target], scoped: dict[str, set[str]]) -> dict[str, list[str]]:
+    multi_py = len({t.python for t in targets}) > 1
+    ignored: dict[str, set[str]] = {}
+    for row in rows:
+        if row.package.key not in scoped:
+            continue
+        for target in targets:
+            if target.platform in scoped[row.package.key] and row.results[target] in (
+                Status.SOURCE,
+                Status.MISSING,
+                Status.UNKNOWN,
+            ):
+                row.results[target] = Status.IGNORED
+                ignored.setdefault(row.package.name, set()).add(target.label(multi_py))
+    return {
+        name: [t.label(multi_py) for t in targets if t.label(multi_py) in labels] for name, labels in ignored.items()
+    }
 
 
 def render_table(rows: list[Row], targets: list[Target], style: Style) -> list[str]:
@@ -401,6 +440,7 @@ def report_json(
     ignored: list[str],
     explained: bool,
     pyodide_lock: PyodideLock | None = None,
+    ignored_targets: dict[str, list[str]] | None = None,
 ) -> str:
     multi_py = len({t.python for t in targets}) > 1
     gaps = [r for r in rows if not r.ok]
@@ -431,6 +471,7 @@ def report_json(
             "packages": [package(r) for r in rows],
             "skipped": [{"name": p.name, "reason": p.skip} for p in skipped],
             "ignored": ignored,
+            **({"ignored_targets": ignored_targets} if ignored_targets else {}),
             "summary": {"packages": len(rows), "with_gaps": len(gaps)},
         },
         indent=2,
@@ -580,6 +621,7 @@ def render_markdown(
     args: argparse.Namespace,
     pyodide_lock: PyodideLock | None,
     source_allowed: bool = False,
+    ignored_targets: dict[str, list[str]] | None = None,
 ) -> list[str]:
     """The same report as the text output, as GitHub-flavoured Markdown (for a job summary or a PR comment)."""
     plain = Style(False)
@@ -588,6 +630,8 @@ def render_markdown(
     if gaps:
         noun = "package" if len(rows) == 1 else "packages"
         out = [f"### wheelgap: {len(gaps)} of {len(rows)} {noun} {'has' if len(gaps) == 1 else 'have'} gaps", ""]
+    elif ignored_targets:
+        out = ["### wheelgap: no unaccepted gaps", ""]
     else:
         out = [
             f"### wheelgap: every package has a wheel for {'all ' if n_t > 1 else ''}{n_t} target{'s' * (n_t > 1)}",
@@ -610,7 +654,8 @@ def render_markdown(
         hidden = len(rows) - len(shown)
         if hidden:
             noun = "package" if hidden == 1 else "packages"
-            out += [f"{hidden} {noun} with wheels for every target hidden (`--all` to show).", ""]
+            reason = "without unaccepted gaps" if ignored_targets else "with wheels for every target"
+            out += [f"{hidden} {noun} {reason} hidden (`--all` to show).", ""]
 
     if gaps:
         out += [gap_summary(gaps, len(rows), plain), ""]
@@ -622,8 +667,12 @@ def render_markdown(
     if skipped:
         names = ", ".join(f"{_code(p.name)} ({p.skip})" for p in skipped)
         out += [f"Skipped {len(skipped)} non-index package{'s' * (len(skipped) != 1)}: {names}", ""]
-    if ignored:
-        out += [f"Ignored: {', '.join(map(_code, ignored))}", ""]
+    if ignored or ignored_targets:
+        accepted = [_code(name) for name in ignored]
+        accepted += [
+            f"{_code(name)} ({', '.join(map(_code, labels))})" for name, labels in (ignored_targets or {}).items()
+        ]
+        out += [f"Ignored: {', '.join(accepted)}", ""]
     for r in rows:
         if r.package.error:
             out += [f"Could not check {_md(r.package.name)}: {_code(r.package.error)}", ""]
@@ -729,6 +778,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.offline:
             require_offline(sources)
         fail_on = args.fail_on or config.get("fail-on", "source")
+        ignore_names = args.ignore or config.get("ignore", [])
+        ignore, scoped_ignore = parse_ignores(ignore_names)
         pyodide_lock = None
         if args.pyodide_lock:
             if args.offline:
@@ -791,18 +842,22 @@ def main(argv: list[str] | None = None) -> int:
     if pyodide_lock:
         apply_bundled(rows, targets, pyodide_lock)
     rows.sort(key=lambda r: r.package.key)
-    ignore_names = args.ignore or config.get("ignore", [])
     raw_ignore = [name.strip() for item in ignore_names for name in item.split(",") if name.strip()]
-    ignore = {canonicalize_name(name) for name in raw_ignore}
     if raw_ignore and not quiet:
         known_keys = {p.key for p in packages}
-        unmatched = list(dict.fromkeys(name for name in raw_ignore if canonicalize_name(name) not in known_keys))
+        unmatched = list(
+            dict.fromkeys(
+                name for name in raw_ignore if canonicalize_name(name.partition(":")[0].strip()) not in known_keys
+            )
+        )
         if unmatched:
             print(f"wheelgap: note: --ignore matches no package: {', '.join(unmatched)}", file=sys.stderr)
     # One entry per package, named as its first input writes it (PyYAML, not pyyaml).
     first_names = {r.package.key: r.package.name for r in reversed(rows) if r.package.key in ignore}
     ignored = sorted(first_names.values(), key=str.lower)
     rows = [r for r in rows if r.package.key not in ignore]
+    ignored_targets = apply_scoped_ignores(rows, targets, scoped_ignore)
+    ignored_text = ignored + [f"{name} ({', '.join(labels)})" for name, labels in ignored_targets.items()]
     gaps = [r for r in rows if not r.ok]
     source_labels = [s.label for s in sources]
     # With --fail-on missing, source builds are accepted; missing and unknown packages still fail.
@@ -810,14 +865,16 @@ def main(argv: list[str] | None = None) -> int:
     code = 0 if args.exit_zero or not failing else 1
 
     if args.json:
-        print(report_json(rows, targets, source_labels, skipped, ignored, args.explain, pyodide_lock))
+        print(report_json(rows, targets, source_labels, skipped, ignored, args.explain, pyodide_lock, ignored_targets))
         return code
 
     if args.markdown:
         source_allowed = bool(gaps) and not failing  # judged on --fail-on alone, not --exit-zero
         print(
             "\n".join(
-                render_markdown(rows, targets, source_labels, skipped, ignored, args, pyodide_lock, source_allowed)
+                render_markdown(
+                    rows, targets, source_labels, skipped, ignored, args, pyodide_lock, source_allowed, ignored_targets
+                )
             )
         )
         return code
@@ -827,8 +884,8 @@ def main(argv: list[str] | None = None) -> int:
         if gaps:
             print(gap_summary(gaps, len(rows), style))
             print("gaps: " + ", ".join(r.package.name for r in gaps))
-        if ignored:
-            print(style.dim("ignored: " + ", ".join(ignored)))
+        if ignored_text:
+            print(style.dim("ignored: " + ", ".join(ignored_text)))
         for r in rows:
             if r.package.error:  # say why a package is "unknown", even in quiet mode
                 print(f"wheelgap: could not check {r.package.name}: {r.package.error}", file=sys.stderr)
@@ -847,7 +904,8 @@ def main(argv: list[str] | None = None) -> int:
         hidden = len(rows) - len(shown)
         if hidden:
             noun = "package" if hidden == 1 else "packages"
-            print(style.dim(f"{hidden} {noun} with wheels for every target hidden (--all to show)"))
+            reason = "without unaccepted gaps" if ignored_targets else "with wheels for every target"
+            print(style.dim(f"{hidden} {noun} {reason} hidden (--all to show)"))
         if args.explain and gaps:
             if hidden:
                 print()
@@ -862,8 +920,8 @@ def main(argv: list[str] | None = None) -> int:
         names = ", ".join(f"{p.name} ({p.skip})" for p in skipped)
         print(style.dim(f"skipped {len(skipped)} non-index package{'s' * (len(skipped) != 1)}: {names}"))
 
-    if ignored:
-        print(style.dim("ignored: " + ", ".join(ignored)))
+    if ignored_text:
+        print(style.dim("ignored: " + ", ".join(ignored_text)))
 
     errors = [r for r in rows if r.package.error]
     for r in errors:
@@ -871,6 +929,9 @@ def main(argv: list[str] | None = None) -> int:
 
     n_t = len(targets)
     if not gaps:
+        if ignored_targets:
+            print(style.green("✓ No unaccepted gaps."))
+            return 0
         what = "The 1 package has" if len(rows) == 1 else f"All {len(rows)} packages have"
         print(style.green(f"✓ {what} a wheel for {'every one of ' if n_t > 1 else ''}{n_t} target{'s' * (n_t > 1)}."))
         return 0
