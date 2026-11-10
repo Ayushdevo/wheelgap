@@ -96,7 +96,7 @@ class _ShellLexer:
         self.pos = 0
         self.raw_quotes = raw_quotes
         self.raw_escapes = raw_escapes
-        self.buf = ""  # the word being built: like Go's wordsBuffer, one buffer shared by nested _stop_on calls
+        self.buf: list[str] = []  # the word being built: like Go's wordsBuffer, one buffer shared by nested _stop_on calls
 
     def words(self) -> list[str]:
         """ProcessWords, raising _LexError where it returns an error."""
@@ -115,17 +115,18 @@ class _ShellLexer:
         result = ""
         words: list[str] = []
         in_word = False
-        self.buf = ""  # this also empties the word of any _stop_on this one is nested in, as in Go
+        self.buf.clear()  # this also empties the word of any _stop_on this one is nested in, as in Go
 
         def add(text: str, raw: bool) -> None:  # wordsStruct's addRawString (raw) and addString
             nonlocal in_word
             for ch in [text] if raw else text:
                 if raw or ch not in _GO_SPACES:
-                    self.buf += ch
+                    if ch:
+                        self.buf.append(ch)
                     in_word = True
                 elif in_word and self.buf:
-                    words.append(self.buf)
-                    self.buf = ""
+                    words.append("".join(self.buf))
+                    self.buf.clear()
                     in_word = False
 
         saved, self.raw_escapes = self.raw_escapes, raw_escapes
@@ -162,8 +163,8 @@ class _ShellLexer:
         finally:
             self.raw_escapes = saved
         if self.buf:
-            words.append(self.buf)
-            self.buf = ""
+            words.append("".join(self.buf))
+            self.buf.clear()
         return result, words
 
     def _quoted(self, quote: str, pattern: bool) -> str:
