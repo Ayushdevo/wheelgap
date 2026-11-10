@@ -370,15 +370,8 @@ def single_python(targets: Iterable[Target]) -> str | None:
     return None
 
 
-def build_targets(
-    pythons: list[str],
-    platforms: list[str],
-    glibc: str = DEFAULT_GLIBC,
-    musl: str = DEFAULT_MUSL,
-    macos: str = DEFAULT_MACOS,
-    ios: str = DEFAULT_IOS,
-    android_api: str | int = DEFAULT_ANDROID_API,
-) -> list[Target]:
+def resolve_platforms(platforms: list[str]) -> list[str]:
+    """Resolve explicit platform selectors without applying default targets."""
     plats: list[str] = []
     for item in platforms:
         for name in item.split(","):
@@ -392,7 +385,19 @@ def build_targets(
                 plats.extend(MOBILE_PLATFORMS)
             else:
                 plats.append(resolve_platform(name))
-    plats = list(dict.fromkeys(plats)) or list(DEFAULT_PLATFORMS)
+    return list(dict.fromkeys(plats))
+
+
+def build_targets(
+    pythons: list[str],
+    platforms: list[str],
+    glibc: str = DEFAULT_GLIBC,
+    musl: str = DEFAULT_MUSL,
+    macos: str = DEFAULT_MACOS,
+    ios: str = DEFAULT_IOS,
+    android_api: str | int = DEFAULT_ANDROID_API,
+) -> list[Target]:
+    plats = resolve_platforms(platforms) or list(DEFAULT_PLATFORMS)
 
     pys = list(dict.fromkeys(parse_python(p) for item in pythons for p in item.split(",") if p.strip()))
     versions = dict(
