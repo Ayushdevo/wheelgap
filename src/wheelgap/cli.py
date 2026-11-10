@@ -17,7 +17,7 @@ from .api import running_python
 from .check import Row, Status, check, explain, has_sdist
 from .dockerfile import DockerfileError, read_dockerfile
 from .pyodide import PyodideLock, PyodideLockError, apply_bundled, check_targets, load_pyodide_lock
-from .pypi import check_index_url, fill_all, is_pypi, recheck_lock
+from .pypi import check_index_url, fill_all, keeps_locked_files, recheck_lock
 from .sources import Package, Source, SourceError, load_inputs, pythons_outside_lock
 from .targets import (
     ALIASES,
@@ -700,7 +700,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 continue
             if args.online:  # fill_all looked up the PyPI packages; the others kept the lock's files
-                other = sum(1 for p in s.packages if not p.skip and p.files is not None and not is_pypi(p.registry))
+                other = sum(1 for p in s.packages if keeps_locked_files(p))
                 failed = 0
                 if not other:
                     continue

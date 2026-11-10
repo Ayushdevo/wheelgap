@@ -188,3 +188,20 @@ def test_fill_all_without_online_still_looks_up_a_private_package_with_no_files(
 )
 def test_is_pypi(registry, expected):
     assert pypi.is_pypi(registry) is expected
+
+
+@pytest.mark.parametrize(
+    ("package", "expected"),
+    [
+        (Package("kept", "1.0", files=["kept-1.0.whl"], registry="https://pkgs.example.com/simple"), True),
+        (Package("onpypi", "1.0", files=["onpypi-1.0.whl"]), False),
+        (
+            Package("onpypi-explicit", "1.0", files=["onpypi_explicit-1.0.whl"], registry="https://pypi.org/simple"),
+            False,
+        ),
+        (Package("nofiles", None), False),
+        (Package("skipped", "1.0", files=["skipped-1.0.whl"], skip="path"), False),
+    ],
+)
+def test_keeps_locked_files(package, expected):
+    assert pypi.keeps_locked_files(package) is expected

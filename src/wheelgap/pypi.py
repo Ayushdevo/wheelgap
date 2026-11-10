@@ -192,6 +192,11 @@ def is_pypi(registry: str | None) -> bool:
     return (registry or PYPI_SIMPLE).rstrip("/") == PYPI_SIMPLE
 
 
+def keeps_locked_files(p: Package) -> bool:
+    """Under --online, a package from another index keeps the files in the lock: PyPI doesn't know it."""
+    return not p.skip and p.files is not None and not is_pypi(p.registry)
+
+
 def recheck_lock(packages: list[Package]) -> tuple[int, int]:
     """Add the index's files to lockfile packages whose lock may be missing some (see pythons_outside_lock).
 
@@ -216,7 +221,7 @@ def fill_all(packages: list[Package], refresh: bool = False, workers: int = 16) 
     """Look packages up on PyPI. With refresh (--online), a package the lock says came from another index keeps
     its locked files instead: PyPI doesn't know it. A package with no files is still looked up, as before.
     Returns how many kept their locked files for that reason."""
-    kept = {id(p) for p in packages if refresh and not p.skip and p.files is not None and not is_pypi(p.registry)}
+    kept = {id(p) for p in packages if refresh and keeps_locked_files(p)}
     todo = [p for p in packages if not p.skip and id(p) not in kept and (refresh or p.files is None)]
     if todo:
         with ThreadPoolExecutor(max_workers=workers) as pool:
