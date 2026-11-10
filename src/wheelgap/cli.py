@@ -17,6 +17,7 @@ from . import __version__
 from .api import running_python
 from .check import Row, Status, check, explain, has_sdist, marker_holds
 from .dockerfile import DockerfileError, read_dockerfile
+from .junit import junit_xml
 from .pyodide import PyodideLock, PyodideLockError, apply_bundled, check_targets, load_pyodide_lock
 from .pypi import check_index_url, fill_all, is_pypi, keeps_locked_files, recheck_lock
 from .sources import Package, Source, SourceError, load_inputs, pythons_outside_lock
@@ -145,6 +146,7 @@ def make_parser() -> argparse.ArgumentParser:
         default=None,
         help="print only the gap summary and affected package names (--no-quiet overrides quiet = true)",
     )
+    p.add_argument("--junit", type=Path, metavar="PATH", help="also write a JUnit XML report for CI")
     p.add_argument("--json", action="store_true", help="print JSON instead of a table")
     p.add_argument(
         "--markdown",
@@ -679,6 +681,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.json and args.markdown:
         parser.error("--json and --markdown can't be used together")
+    if args.list_targets and args.junit is not None:
+        parser.error("--list-targets cannot be combined with --junit")
     if args.list_targets and args.markdown:
         parser.error("--list-targets has no Markdown form (use --json)")
     if args.offline and args.online:
@@ -808,6 +812,14 @@ def main(argv: list[str] | None = None) -> int:
     # With --fail-on missing, source builds are accepted; missing and unknown packages still fail.
     failing = gaps if fail_on == "source" else [r for r in gaps if r.fails_install]
     code = 0 if args.exit_zero or not failing else 1
+
+    if args.junit is not None:
+        try:
+            args.junit.write_text(junit_xml(rows, targets, fail_on), encoding="utf-8")
+        except OSError as exc:
+            error = OSError(f"could not write JUnit report: {exc}")
+            print(f"wheelgap: error: {error}", file=sys.stderr)
+            return input_error_json(error) if args.json else 2
 
     if args.json:
         print(report_json(rows, targets, source_labels, skipped, ignored, args.explain, pyodide_lock))

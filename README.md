@@ -221,6 +221,8 @@ The job fails when a dependency would build from source on a target you ship, fo
 
 Outside the Action, `--markdown` prints the same report as Markdown, for a job summary (`wheelgap --markdown >> "$GITHUB_STEP_SUMMARY"`) or a PR comment. With `--explain`, the rejected wheels go in a collapsed section.
 
+Add `--junit wheelgap.xml` to write a JUnit XML report for CI dashboards alongside the normal output. Each target is a suite, with one case per checked package. `--fail-on missing` accepts source builds in the XML report. `--exit-zero` changes only the process exit code.
+
 ### With pre-commit
 
 ```yaml
