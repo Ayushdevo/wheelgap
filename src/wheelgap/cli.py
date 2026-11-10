@@ -829,7 +829,12 @@ def main(argv: list[str] | None = None) -> int:
         return code
 
     style = Style(use_color(args.color))
+    bundled = [r for r in rows if Status.BUNDLED in r.results.values()]
     if quiet:
+        if pyodide_lock:
+            mismatches = [r for r in bundled if bundled_version_differs(r, pyodide_lock)]
+            if mismatches:
+                print(style.dim(bundled_line(mismatches, pyodide_lock)))
         if gaps:
             print(gap_summary(gaps, len(rows), style))
             print("gaps: " + ", ".join(r.package.name for r in gaps))
@@ -860,7 +865,6 @@ def main(argv: list[str] | None = None) -> int:
             for ln in render_explain(gaps, targets, style):
                 print(ln)
 
-    bundled = [r for r in rows if Status.BUNDLED in r.results.values()]
     if bundled and pyodide_lock:
         print(style.dim(bundled_line(bundled, pyodide_lock)))
 

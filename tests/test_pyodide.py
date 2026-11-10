@@ -50,7 +50,7 @@ def test_quiet_omits_pyodide_bundled_details(capsys, fake_pypi, lock):
     assert out == "1 of 2 packages has gaps: 1 can't install at all.\ngaps: nowheels\n"
 
 
-@pytest.mark.parametrize("mode", ["text", "json"])
+@pytest.mark.parametrize("mode", ["text", "json", "quiet"])
 def test_different_bundled_version_is_flagged(capsys, fake_pypi, tmp_path, mode):
     path = tmp_path / "pyodide-lock.json"
     info = {"abi_version": "2025_0", "python": "3.13.2", "version": "0.29.0"}
