@@ -122,6 +122,8 @@ If you think wheelgap got a package wrong, that output (or `--json --explain`) i
 
 **Exit codes:** `0` no gaps, `1` gaps found, `2` bad input. `--exit-zero` always exits `0`. `--fail-on missing` (or `fail-on = "missing"` in `[tool.wheelgap]`) accepts source builds and only exits `1` when a package can't be installed at all.
 
+If an input can't be read (a missing lockfile, an unknown target, a bad `[tool.wheelgap]` value), `--json` prints `{"error": {"message": "...", "type": "TargetError"}}` on stdout instead of results, next to the usual `wheelgap: error:` line on stderr and exit code 2. Command-line usage errors from argparse are still plain text on stderr.
+
 Use `--ignore psycopg2` for accepted gaps (repeatable or comma-separated, with case-insensitive package-name matching and equivalent hyphens, underscores and dots): matched packages are excluded from the table, counts and exit status, and listed as ignored in text (including quiet mode), JSON and Markdown. Set `ignore = ["psycopg2"]` in `[tool.wheelgap]` to use it by default; any `--ignore` flags replace the configured list rather than adding to it, and `--ignore ""` clears it for one run.
 
 Use `-q` / `--quiet` (or `quiet = true` in `[tool.wheelgap]`) to show only the gap summary and package names. Clean runs without ignored packages are silent, JSON and Markdown output are unchanged, and quiet text output cannot be combined with `--explain` (`--json --explain` and `--markdown --explain` work).
