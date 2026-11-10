@@ -1,0 +1,10 @@
+# wheelgap
+
+> wheelgap checks whether pinned Python dependencies have a compatible wheel for each target and reports when installing them would require a source build or fail.
+
+## Docs
+
+- [Quick start](https://github.com/wheelgap/wheelgap#install-and-run-under-30-seconds): Run wheelgap against a project or lockfile.
+- [Platforms](https://github.com/wheelgap/wheelgap#targets): Select deployment platforms and Python interpreters.
+- [Recipes](https://github.com/wheelgap/wheelgap/blob/main/docs/recipes.md): Interpret JSON reports and use wheelgap in CI, scripts and agents.
+- [Contributor instructions](https://github.com/wheelgap/wheelgap/blob/main/AGENTS.md): Repository structure, tests and contribution rules.
