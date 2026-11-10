@@ -170,10 +170,18 @@ def test_mirror_fallback_with_no_usable_files_is_unknown(monkeypatch):
     assert pkg.error == "unexpected response from the index" and pkg.files is None
 
 
-def test_fill_all_without_online_still_looks_up_a_private_package_with_no_files(fake_pypi):
+def test_fill_all_skips_a_private_package_with_no_files(fake_pypi):
     pkg = Package(name="purewheel", version="3.1", files=None, registry="https://pkgs.example.com/simple")
     assert pypi.fill_all([pkg]) == 0
-    assert [url for url in fake_pypi if "purewheel" in url], fake_pypi
+    assert pkg.skip == "private index"
+    assert not [url for url in fake_pypi if "purewheel" in url], fake_pypi
+
+
+def test_fill_all_still_looks_up_a_pypi_package_with_no_files(fake_pypi):
+    pkg = Package(name="purewheel", version="3.1", files=None)
+    assert pypi.fill_all([pkg]) == 0
+    assert pkg.skip is None and pkg.files == ["purewheel-3.1-py3-none-any.whl"]
+    assert fake_pypi == ["https://pypi.org/pypi/purewheel/3.1/json"]
 
 
 @pytest.mark.parametrize(

@@ -218,9 +218,12 @@ def recheck_lock(packages: list[Package]) -> tuple[int, int]:
 
 
 def fill_all(packages: list[Package], refresh: bool = False, workers: int = 16) -> int:
-    """Look packages up on PyPI. With refresh (--online), a package the lock says came from another index keeps
-    its locked files instead: PyPI doesn't know it. A package with no files is still looked up, as before.
-    Returns how many kept their locked files for that reason."""
+    """Look packages up on PyPI. A package the lock says came from another index is never looked up: PyPI doesn't
+    know it. With refresh (--online) it keeps its locked files; with no files (an old poetry.lock) it is skipped as
+    a private index. Returns how many kept their locked files for that reason."""
+    for p in packages:
+        if p.files is None and not p.skip and not is_pypi(p.registry):
+            p.skip = "private index"  # the name is internal; a namesake on PyPI is another package
     kept = {id(p) for p in packages if refresh and keeps_locked_files(p)}
     todo = [p for p in packages if not p.skip and id(p) not in kept and (refresh or p.files is None)]
     if todo:

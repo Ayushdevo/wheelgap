@@ -18,7 +18,7 @@ from .api import running_python
 from .check import Row, Status, check, explain, has_sdist, marker_holds
 from .dockerfile import DockerfileError, read_dockerfile
 from .pyodide import PyodideLock, PyodideLockError, apply_bundled, check_targets, load_pyodide_lock
-from .pypi import check_index_url, fill_all, keeps_locked_files, recheck_lock
+from .pypi import check_index_url, fill_all, is_pypi, keeps_locked_files, recheck_lock
 from .sources import Package, Source, SourceError, load_inputs, pythons_outside_lock
 from .targets import (
     ALIASES,
@@ -621,7 +621,8 @@ def require_offline(sources: list[Source]) -> None:
     """--offline: raise SourceError if an input has packages that can only be answered by looking them up."""
     problems = []
     for s in sources:
-        need = [p.name for p in s.packages if not p.skip and p.files is None]
+        # A private-index package with no files is skipped by fill_all, not looked up, so it doesn't count.
+        need = [p.name for p in s.packages if not p.skip and p.files is None and is_pypi(p.registry)]
         if need:
             names = ", ".join(need[:3]) + (", …" if len(need) > 3 else "")
             problems.append(

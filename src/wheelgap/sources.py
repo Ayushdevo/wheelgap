@@ -218,7 +218,8 @@ def parse_poetry_lock(path: Path) -> Source:
             entries = p.get("files")
             if entries is None:
                 entries = legacy_files.get(p["name"])
-            # No files recorded at all (old [metadata.hashes] locks): leave them for the index lookup.
+            # No files recorded at all (old [metadata.hashes] locks): PyPI packages are looked up on the index,
+            # packages from another index are skipped (fill_all).
             pkg.files = None if entries is None else [f for f in (_filename(e) for e in entries) if f]
         edges[len(pkgs)] = _poetry_edges(p)
         pkgs.append(pkg)

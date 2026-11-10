@@ -500,6 +500,39 @@ def test_pipfile_lock_private_index_is_not_looked_up(capsys, tmp_path, fake_pypi
     assert fake_pypi and not any("acme" in url for url in fake_pypi)
 
 
+def test_poetry_lock_private_index_with_no_files_is_not_looked_up(capsys, tmp_path, fake_pypi):
+    path = tmp_path / "poetry.lock"
+    path.write_text(
+        '[[package]]\nname = "acme-utils"\nversion = "2.1.0"\n\n'
+        '[package.source]\ntype = "legacy"\nurl = "https://pkgs.example.com/simple"\nreference = "private"\n\n'
+        '[metadata]\nlock-version = "1.1"\npython-versions = ">=3.8"\n\n'
+        '[metadata.hashes]\nacme-utils = ["sha256:00"]\n',
+        encoding="utf-8",
+    )
+    code, out, err = run(capsys, str(path), "-p", "3.13", "-t", "linux-x86_64", "--json")
+    assert code == 0, err
+    data = json.loads(out)
+    assert data["skipped"] == [{"name": "acme-utils", "reason": "private index"}]
+    assert not data["packages"]
+    assert not any("acme" in url for url in fake_pypi)
+
+
+def test_offline_allows_a_private_index_package_with_no_files(capsys, tmp_path, fake_pypi):
+    # fill_all skips it without contacting any index, so --offline has nothing to refuse.
+    path = tmp_path / "poetry.lock"
+    path.write_text(
+        '[[package]]\nname = "acme-utils"\nversion = "2.1.0"\n\n'
+        '[package.source]\ntype = "legacy"\nurl = "https://pkgs.example.com/simple"\nreference = "private"\n\n'
+        '[metadata]\nlock-version = "1.1"\npython-versions = ">=3.8"\n\n'
+        '[metadata.hashes]\nacme-utils = ["sha256:00"]\n',
+        encoding="utf-8",
+    )
+    code, out, err = run(capsys, str(path), "--offline", "-p", "3.13", "-t", "linux-x86_64", "--json")
+    assert code == 0, err
+    assert json.loads(out)["skipped"] == [{"name": "acme-utils", "reason": "private index"}]
+    assert fake_pypi == []
+
+
 def test_malformed_pipfile_lock_exits_2(capsys, tmp_path, fake_pypi):
     path = tmp_path / "Pipfile.lock"
     path.write_text("{invalid", encoding="utf-8")
