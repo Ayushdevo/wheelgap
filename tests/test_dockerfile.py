@@ -244,7 +244,7 @@ _HEREDOC_LIKE_LINES = [
 
 @pytest.mark.parametrize("line", _HEREDOC_LIKE_LINES)
 def test_lines_with_heredoc_like_text_never_hide_the_final_from(tmp_path, line):
-    # wheelgap doesn't parse heredocs, so whatever these mean to Docker, the final FROM is still found.
+    # These lines do not open heredocs, so the final FROM is still found.
     text = f"FROM python:3.13-alpine AS base\n{line}\nFROM python:3.12-slim\n"
     assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.12", "linux-x86_64", glibc="2.41")
 
@@ -538,3 +538,40 @@ def test_dockerfile_that_is_not_utf8_is_a_clear_error(tmp_path):
     path.write_bytes(b"FROM --platform=linux/arm64\xa0python:3.13\n")  # cp1252: Docker would read 0xa0 as a space
     with pytest.raises(DockerfileError, match="not UTF-8 \\(byte 0xa0 at offset 27\\), pass -p/-t instead"):
         read_dockerfile(path)
+
+
+@pytest.mark.parametrize(
+    ("instruction", "body"),
+    [
+        ("RUN cat <<EOF", "FROM scratch\nEOF"),
+        ("COPY <<'EOF' /query", "FROM base\nEOF"),
+        ("ONBUILD RUN cat <<A <<-B", "FROM scratch\nA\n B\nFROM scratch\n\tB\r\r"),
+        ("RUN cat " + chr(92) + "\n  <<EOF", "FROM scratch\nline" + chr(92) + "\nEOF"),
+    ],
+)
+def test_from_in_heredoc_body_is_not_an_instruction(tmp_path, instruction, body):
+    text = f"FROM python:3.13-alpine\n{instruction}\n{body}\n"
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.13", "musl-x86_64", musl="1.2")
+    text += "FROM python:3.12-slim\n"
+    assert read_dockerfile(_dockerfile(tmp_path, text)) == ImageTarget("3.12", "linux-x86_64", glibc="2.41")
+
+
+@pytest.mark.parametrize(
+    ("instruction", "body", "missing"),
+    [
+        ("RUN cat <<EOF", "FROM python:3.12-slim", "EOF"),
+        ("RUN cat <<-EOF", " EOF", "EOF"),
+        ("RUN cat <<A <<B", "A\nFROM python:3.12-slim", "B"),
+        ("RUN echo $((1 << BITS))", "", r"BITS\)\)"),
+    ],
+)
+def test_unterminated_heredocs_are_errors(instruction, body, missing):
+    text = f"FROM python:3.13\n{instruction}\n{body}"
+    with pytest.raises(DockerfileError, match=rf"unterminated heredoc: '{missing}'"):
+        last_from(text)
+
+
+def test_deeply_nested_heredoc_delimiter_is_a_dockerfile_error():
+    nested = "${x:-" * 1000 + "EOF" + "}" * 1000
+    with pytest.raises(DockerfileError, match="nested too deeply"):
+        last_from(f"FROM python:3.13\nRUN cat <<{nested}\n")

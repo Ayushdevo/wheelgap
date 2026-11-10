@@ -70,9 +70,6 @@ class ImageTarget:
 _DIRECTIVE_RE = re.compile(r"^#\s*([A-Za-z]+)\s*=\s*(.+?)\s*$")
 _DIRECTIVES = {"syntax", "escape", "check"}  # the parser directives BuildKit knows
 
-# A Python import, e.g. inside a `RUN <<EOF` heredoc: never a valid FROM instruction.
-_PY_IMPORT_RE = re.compile(r"^from\s+\S+\s+import\s")
-
 # Heredocs, as BuildKit reads them: see _heredocs.
 # Go's unicode.IsSpace. Unlike str.isspace, it doesn't count \x1c-\x1f.
 _GO_SPACES = (
@@ -96,7 +93,9 @@ class _ShellLexer:
         self.pos = 0
         self.raw_quotes = raw_quotes
         self.raw_escapes = raw_escapes
-        self.buf: list[str] = []  # the word being built: like Go's wordsBuffer, one buffer shared by nested _stop_on calls
+        self.buf: list[
+            str
+        ] = []  # the word being built: like Go's wordsBuffer, one buffer shared by nested _stop_on calls
 
     def words(self) -> list[str]:
         """ProcessWords, raising _LexError where it returns an error."""
@@ -390,22 +389,19 @@ def _escape_char(lines: list[str]) -> str:
 
 
 def _from_lines(text: str) -> list[str]:
-    """The arguments of every FROM instruction in order, with line continuations joined as Docker joins them.
-
-    Python `from x import y` lines (from a heredoc) are skipped. Other heredoc contents aren't parsed,
-    so a line in one that looks exactly like a FROM instruction (say, SQL's `FROM base` naming a
-    stage) is still read as one: a known limit, pass -p/-t for such Dockerfiles.
-    """
+    """The arguments of every FROM instruction, excluding heredoc bodies."""
     lines = [raw.rstrip("\r") for raw in text.split("\n")]  # Docker's trimNewline drops every trailing \r
-    esc = re.escape(_escape_char(lines))
+    escape = _escape_char(lines)
+    esc = re.escape(escape)
     continued = re.compile(rf"(?<!{esc}){esc}[ \t]*$")  # one escape char at the end, not two
+    remaining = iter(lines)
     found = []
     parts: list[str] = []  # an instruction continued onto the next line
 
     def finish(instruction: str, joined: bool) -> None:
         # Docker splits the keyword off on ASCII whitespace only, so `FROM<U+00A0>python` isn't a FROM to it.
         words = re.split(r"[ \t\v\f\r]+", instruction, maxsplit=1)
-        if words[0].upper() != "FROM" and re.match(r"(?i)FROM\s", words[0]) and not _PY_IMPORT_RE.match(instruction):
+        if words[0].upper() != "FROM" and re.match(r"(?i)FROM\s", words[0]):
             raise DockerfileError(
                 f"unknown instruction {words[0]!r} (Docker splits instructions on ASCII whitespace only)"
             )
@@ -414,10 +410,20 @@ def _from_lines(text: str) -> list[str]:
         if words and words[0].upper() == "FROM":
             if len(words) == 1:
                 raise DockerfileError("FROM with no image")
-            if not _PY_IMPORT_RE.match(instruction):
-                found.append(words[1])
+            found.append(words[1])
+        try:
+            heredocs = _heredocs(instruction, escape)
+        except RecursionError as exc:
+            raise DockerfileError("Dockerfile heredoc delimiter is nested too deeply") from exc
+        # BuildKit compares raw body lines, before any comment or continuation processing.
+        for delimiter, strip_tabs in heredocs:
+            for line in remaining:
+                if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                    break
+            else:
+                raise DockerfileError(f"unterminated heredoc: {delimiter!r}")
 
-    for line in lines:
+    for line in remaining:
         stripped = line.strip()
         if parts and (not stripped or stripped.startswith("#")):
             continue  # Docker skips blank and comment lines inside a continued instruction
