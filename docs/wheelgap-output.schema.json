@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Wheelgap dependency check output",
+  "type": "object",
+  "description": "Successful wheelgap --json check, including checks that found blocking gaps.",
+  "required": [
+    "version",
+    "sources",
+    "targets",
+    "packages",
+    "skipped",
+    "ignored",
+    "summary"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Wheelgap version."
+    },
+    "sources": {
+      "type": "array",
+      "description": "Input labels.",
+      "items": {
+        "type": "string",
+        "description": "Label for one input."
+      }
+    },
+    "targets": {
+      "type": "array",
+      "description": "Checked targets in display order.",
+      "items": {
+        "$ref": "#/$defs/target"
+      }
+    },
+    "packages": {
+      "type": "array",
+      "description": "Checked package entries.",
+      "items": {
+        "$ref": "#/$defs/package"
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "description": "Skipped package entries.",
+      "items": {
+        "$ref": "#/$defs/skipped"
+      }
+    },
+    "ignored": {
+      "type": "array",
+      "description": "Explicitly ignored package names.",
+      "items": {
+        "type": "string",
+        "description": "Ignored package name."
+      }
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "description": "A selected Python and platform combination.",
+      "required": [
+        "label",
+        "python",
+        "platform"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Exact key used in package result maps, prefixed by Python for multi-version reports."
+        },
+        "python": {
+          "type": "string",
+          "description": "Target Python major/minor, with t for a free-threaded interpreter."
+        },
+        "platform": {
+          "type": "string",
+          "description": "Canonical platform name."
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "description": "The results for one package entry.",
+      "required": [
+        "name",
+        "version",
+        "error",
+        "results"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Package name as written in the input."
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Selected or pinned package version, when known."
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Lookup error message, when present."
+        },
+        "results": {
+          "type": "object",
+          "description": "Wheel availability keyed by target label.",
+          "additionalProperties": {
+            "$ref": "#/$defs/status"
+          }
+        },
+        "rejected": {
+          "type": "object",
+          "description": "Rejected distributions keyed by affected target, with --explain.",
+          "additionalProperties": {
+            "type": "array",
+            "description": "Rejected files.",
+            "items": {
+              "$ref": "#/$defs/rejectedFile"
+            }
+          }
+        },
+        "via": {
+          "type": "object",
+          "description": "Shortest known dependency paths keyed by target, with --explain.",
+          "additionalProperties": {
+            "type": "array",
+            "description": "A dependency path from the project or group.",
+            "items": {
+              "type": "string",
+              "description": "Dependency path entry."
+            }
+          }
+        },
+        "bundled": {
+          "type": "string",
+          "description": "Version shipped by Pyodide if one or more targets use it."
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "description": "Wheel availability on one target.",
+      "enum": [
+        "wheel",
+        "source",
+        "missing",
+        "unknown",
+        "n/a",
+        "bundled"
+      ]
+    },
+    "rejectedFile": {
+      "type": "object",
+      "description": "A distribution file rejected for a target.",
+      "required": [
+        "file",
+        "reason"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Distribution filename."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable rejection reason."
+        }
+      }
+    },
+    "skipped": {
+      "type": "object",
+      "description": "A package excluded from the check.",
+      "required": [
+        "name",
+        "reason"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the skipped package."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason the package was skipped."
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "description": "Counts across the checked package entries.",
+      "required": [
+        "packages",
+        "with_gaps"
+      ],
+      "properties": {
+        "packages": {
+          "type": "integer",
+          "description": "Number of checked package entries.",
+          "minimum": 0
+        },
+        "with_gaps": {
+          "type": "integer",
+          "description": "Number of entries with a source, missing or unknown result.",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
