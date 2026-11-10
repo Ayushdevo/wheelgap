@@ -383,11 +383,16 @@ def render_explain(rows: list[Row], targets: list[Target], style: Style) -> list
     return out
 
 
+def bundled_version_differs(row: Row, lock: PyodideLock) -> bool:
+    pinned = row.package.version
+    return bool(pinned and pinned != lock.packages[row.package.key])
+
+
 def bundled_line(rows: list[Row], lock: PyodideLock) -> str:
     def one(r: Row) -> str:
         have = lock.packages[r.package.key]
         pinned = r.package.version
-        return f"{r.package.name} {have}" + (f" (you pinned {pinned})" if pinned and pinned != have else "")
+        return f"{r.package.name} {have}" + (f" (you pinned {pinned})" if bundled_version_differs(r, lock) else "")
 
     noun = "package comes" if len(rows) == 1 else "packages come"
     return f"{len(rows)} {noun} from Pyodide {lock.pyodide_version}'s own builds: " + ", ".join(map(one, rows))
@@ -414,6 +419,7 @@ def report_json(
         }
         if pyodide_lock and Status.BUNDLED in r.results.values():
             out["bundled"] = pyodide_lock.packages[r.package.key]
+            out["bundled_version_differs"] = bundled_version_differs(r, pyodide_lock)
         if explained:
             out["rejected"] = {
                 t.label(multi_py): [{"file": f, "reason": why} for f, why in explain(r.package.files or [], t)]
