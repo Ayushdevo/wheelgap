@@ -290,19 +290,19 @@ def _two_source_pipfile_lock(tmp_path):
     return path
 
 
-def test_pipfile_lock_private_index_is_skipped(tmp_path):
+def test_pipfile_lock_preserves_registry_for_lookup_policy(tmp_path):
     (src,) = load_inputs([str(_two_source_pipfile_lock(tmp_path))])
-    assert [(p.name, p.skip) for p in src.packages] == [
-        ("acme-utils", "private index"),
-        ("requests", None),
-        ("six", None),
-        ("fastlib", None),
-        ("ghost", "private index"),  # an index the lock doesn't describe: can't tell it's PyPI
-        ("oddball", "private index"),  # a URL urlparse rejects: skipped, not a crash
+    assert [(p.name, p.skip, p.registry) for p in src.packages] == [
+        ("acme-utils", None, "https://pkgs.example.com/simple"),
+        ("requests", None, None),
+        ("six", None, None),
+        ("fastlib", None, None),
+        ("ghost", "private index", None),  # an index the lock doesn't describe: can't tell it's PyPI
+        ("oddball", None, "https://[bad/simple"),  # lookup policy rejects malformed URLs
     ]
 
 
-def test_pipfile_lock_private_index_in_one_category_skips_the_package(tmp_path):
+def test_pipfile_lock_preserves_registry_when_present_in_one_category(tmp_path):
     # Pipenv writes "index" on direct dependencies: the same package can be direct in develop, transitive in default.
     path = tmp_path / "Pipfile.lock"
     lock = {
@@ -312,7 +312,9 @@ def test_pipfile_lock_private_index_in_one_category_skips_the_package(tmp_path):
     }
     path.write_text(json.dumps(lock), encoding="utf-8")
     (src,) = load_inputs([str(path)])
-    assert [(p.name, p.skip) for p in src.packages] == [("acme-utils", "private index")]
+    assert [(p.name, p.skip, p.registry) for p in src.packages] == [
+        ("acme-utils", None, "https://pkgs.example.com/simple")
+    ]
 
 
 def test_pipfile_lock_malformed_package_entry_raises(tmp_path):

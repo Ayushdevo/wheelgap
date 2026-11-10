@@ -1398,3 +1398,51 @@ def test_ignore_unmatched_does_not_change_exit_code(capsys, fixtures):
     code_unmatched, _, err = run(capsys, *args, "--ignore", "nosuchpkg")
     assert "matches no package: nosuchpkg" in err
     assert code_unmatched == code_plain == 1
+
+
+@pytest.mark.parametrize(
+    ("index_url", "offline", "expected_code", "expected_calls"),
+    [
+        ("https://mirror.example.com/pypi", False, 0, ["https://mirror.example.com/pypi/fastlib/2.0.0/json"]),
+        ("https://mirror.example.com/pypi", True, 2, []),
+        ("https://other.example.com/pypi", False, 0, []),
+        ("https://mirror.example.com:444/pypi", False, 0, []),
+        ("http://mirror.example.com/pypi", False, 0, []),
+    ],
+)
+def test_pipfile_mirror_uses_only_the_configured_origin(
+    tmp_path, capsys, monkeypatch, index_url, offline, expected_code, expected_calls
+):
+    from wheelgap import pypi
+
+    path = tmp_path / "Pipfile.lock"
+    path.write_text(
+        json.dumps(
+            {
+                "_meta": {"sources": [{"name": "mirror", "url": "https://mirror.example.com:443/simple"}]},
+                "default": {"fastlib": {"version": "==2.0.0", "index": "mirror"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return {"urls": [{"filename": "fastlib-2.0.0-py3-none-any.whl"}]}
+
+    monkeypatch.setenv("WHEELGAP_INDEX_URL", index_url)
+    monkeypatch.setattr(pypi, "fetch_json", fetch)
+    args = [str(path), "-p", "3.13", "-t", "linux-x86_64", "--json"]
+    if offline:
+        args.append("--offline")
+    code, out, _ = run(capsys, *args)
+    assert code == expected_code
+    data = json.loads(out)
+    assert calls == expected_calls
+    if offline:
+        assert "needs the index" in data["error"]["message"]
+    elif expected_calls:
+        assert data["packages"][0]["results"] == {"linux-x86_64": "wheel"}
+    else:
+        assert data["skipped"] == [{"name": "fastlib", "reason": "private index"}]

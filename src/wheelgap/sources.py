@@ -50,7 +50,7 @@ class Package:
     spec: str | None = None
     # Files of a pinned release that the index marks as yanked (see check.status_for).
     yanked: frozenset[str] = frozenset()
-    # uv.lock / pylock.toml / poetry.lock: the index the lock says the package came from, e.g. https://pypi.org/simple.
+    # uv.lock / pylock.toml / poetry.lock / Pipfile.lock: the index the lock says the package came from, e.g. https://pypi.org/simple.
     registry: str | None = None
 
     @property
@@ -346,8 +346,10 @@ def _add_once(pkgs: list[Package], seen: dict[tuple[str, str | None], Package], 
         seen[key] = pkg
         pkgs.append(pkg)
         return
-    if pkg.skip == "private index":
-        first.skip = pkg.skip  # Pipenv may pin the index in one category only: keep the name off pypi.org anyway
+    if pkg.skip == "private index" or (pkg.registry and first.registry and pkg.registry != first.registry):
+        first.skip = "private index"  # conflicting or unknown Pipenv origins must stay off the index
+    elif pkg.registry:
+        first.registry = pkg.registry  # Pipenv may pin the index in one category only
     if first.markers is not None:
         first.markers = None if pkg.markers is None else first.markers + pkg.markers
 
@@ -419,8 +421,12 @@ def parse_pipfile_lock(path: Path) -> Source:
             if pkg.skip is None and p.get("editable"):
                 pkg.skip = "editable"
             index = p.get("index")
-            if pkg.skip is None and index is not None and not _is_public_pypi(source_urls.get(str(index))):
-                pkg.skip = "private index"  # don't send internal names to pypi.org, or check a namesake there
+            if pkg.skip is None and index is not None:
+                registry = source_urls.get(str(index))
+                if not registry:
+                    pkg.skip = "private index"
+                elif not _is_public_pypi(registry):
+                    pkg.registry = registry.rstrip("/")
             _add_once(pkgs, seen, pkg)
     return Source(path.name, pkgs)
 

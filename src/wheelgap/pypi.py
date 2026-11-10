@@ -206,6 +206,29 @@ def is_pypi(registry: str | None) -> bool:
     return (registry or PYPI_SIMPLE).rstrip("/") == PYPI_SIMPLE
 
 
+def needs_index_files(p: Package) -> bool:
+    """Whether a package without a file list can be resolved on the configured index."""
+    if p.files is not None or p.skip:
+        return False
+    if is_pypi(p.registry):
+        return True
+    if p.origin != "Pipfile.lock" or not p.registry:
+        return False
+
+    def origin(url: str) -> tuple[str, str, int] | None:
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme in ("http", "https") and parsed.hostname:
+                default_port = 443 if parsed.scheme == "https" else 80
+                return parsed.scheme, parsed.hostname, parsed.port or default_port
+        except ValueError:
+            pass  # an invalid source URL cannot establish a match
+        return None
+
+    registry_origin = origin(p.registry)
+    return registry_origin is not None and registry_origin == origin(index_url())
+
+
 def keeps_locked_files(p: Package) -> bool:
     """Under --online, a package from another index keeps the files in the lock: PyPI doesn't know it."""
     return not p.skip and p.files is not None and not is_pypi(p.registry)
@@ -232,12 +255,12 @@ def recheck_lock(packages: list[Package]) -> tuple[int, int]:
 
 
 def fill_all(packages: list[Package], refresh: bool = False, workers: int = 16, python: str | None = None) -> int:
-    """Look packages up on PyPI. A package the lock says came from another index is never looked up: PyPI doesn't
-    know it. With refresh (--online) it keeps its locked files; with no files (an old poetry.lock) it is skipped as
-    a private index. `python` limits range resolution to releases supporting that interpreter.
+    """Look packages up on the configured index. Foreign packages keep their locked files or are skipped.
+    A Pipenv package with no file list can use a configured JSON API on the same origin.
+    `python` limits range resolution to releases supporting that interpreter.
     Returns how many kept their locked files for that reason."""
     for p in packages:
-        if p.files is None and not p.skip and not is_pypi(p.registry):
+        if p.files is None and not p.skip and not needs_index_files(p):
             p.skip = "private index"  # the name is internal; a namesake on PyPI is another package
     kept = {id(p) for p in packages if refresh and keeps_locked_files(p)}
     todo = [p for p in packages if not p.skip and id(p) not in kept and (refresh or p.files is None)]
