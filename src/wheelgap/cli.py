@@ -10,11 +10,12 @@ import sys
 import tomllib
 from pathlib import Path
 
+from packaging.markers import InvalidMarker, Marker
 from packaging.utils import canonicalize_name
 
 from . import __version__
 from .api import running_python
-from .check import Row, Status, check, explain, has_sdist
+from .check import Row, Status, check, explain, has_sdist, marker_holds
 from .dockerfile import DockerfileError, read_dockerfile
 from .pyodide import PyodideLock, PyodideLockError, apply_bundled, check_targets, load_pyodide_lock
 from .pypi import check_index_url, fill_all, keeps_locked_files, recheck_lock
@@ -32,6 +33,7 @@ from .targets import (
     EXTRA_ARCHES,
     MANYLINUX_FLOOR,
     MANYLINUX_X86_ARCHES,
+    NATIVE_PLATFORMS,
     PLATFORMS,
     PYODIDE_PLATFORMS,
     Target,
@@ -245,6 +247,37 @@ def load_config(path: Path) -> dict:
             raise SourceError(f"{path}: unknown key in [tool.wheelgap]: {key}")
         config[key] = value
     return config
+
+
+def load_uv_targets(path: Path, pythons: list[str]) -> list[str]:
+    """Native platforms needed by any required-environments marker for any selected Python."""
+    table = tomllib.loads(path.read_text(encoding="utf-8")).get("tool", {}).get("uv", {})
+    if not isinstance(table, dict):
+        raise SourceError(f"{path}: [tool.uv] must be a table")
+    markers = table.get("required-environments", [])
+    if isinstance(markers, str):  # uv accepts a single marker as well as a list
+        markers = [markers]
+    if not isinstance(markers, list) or not all(isinstance(m, str) for m in markers):
+        raise SourceError(f"{path}: [tool.uv] required-environments must be a string or a list of strings")
+    if not markers:
+        return []
+    # marker_holds conservatively accepts unparseable package markers. A project setting
+    # should instead report a typo, rather than silently select every native platform.
+    for marker in markers:
+        try:
+            Marker(marker)
+        except InvalidMarker as e:
+            raise SourceError(f"{path}: [tool.uv] required-environments has an invalid marker {marker!r}: {e}") from e
+    targets = build_targets(pythons, NATIVE_PLATFORMS)
+    platforms = list(dict.fromkeys(t.platform for t in targets if any(marker_holds(m, t) for m in markers)))
+    if not platforms:
+        # e.g. a mobile-only project, or `wheelgap requests` run in a project folder: don't fail the run
+        print(
+            f"wheelgap: note: {path} [tool.uv] required-environments matches none of the native targets "
+            f"for Python {', '.join(pythons)}, so the default targets are checked; select targets with -t",
+            file=sys.stderr,
+        )
+    return platforms
 
 
 class Style:
@@ -645,9 +678,22 @@ def main(argv: list[str] | None = None) -> int:
             config.update(python=[image.python], targets=[image.platform])
             config.update({k: v for k, v in (("glibc", image.glibc), ("musl", image.musl)) if v})
         glibc_version, musl_version = libc_versions(args, config)
+        pythons = (
+            args.python or config.get("python") or read_python_version(project_dir(args.inputs)) or [running_python()]
+        )
+        platforms = args.target or config.get("targets", [])
+        if not platforms and pyproject:
+            platforms = load_uv_targets(pyproject, pythons)
+            if platforms and not quiet:
+                note = (
+                    f"wheelgap: note: targets from {pyproject} [tool.uv] required-environments: {', '.join(platforms)}"
+                )
+                if any(p.startswith("musl-") for p in platforms):
+                    note += "; Linux markers select both glibc and musl targets"
+                print(note, file=sys.stderr)
         targets = build_targets(
-            args.python or config.get("python") or read_python_version(project_dir(args.inputs)) or [running_python()],
-            args.target or config.get("targets", []),
+            pythons,
+            platforms,
             glibc_version,
             musl_version,
             args.macos or config.get("macos", DEFAULT_MACOS),

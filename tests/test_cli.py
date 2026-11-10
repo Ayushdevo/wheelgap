@@ -6,13 +6,175 @@ import pytest
 
 from wheelgap import cli
 from wheelgap.cli import main
-from wheelgap.targets import ALIASES, PLATFORMS
+from wheelgap.targets import ALIASES, DEFAULT_PLATFORMS, PLATFORMS
 
 
 def run(capsys, *argv):
     code = main(list(argv))
     out = capsys.readouterr()
     return code, out.out, out.err
+
+
+@pytest.mark.parametrize(
+    "markers,expected",
+    [
+        (["sys_platform == 'linux'"], ["linux-x86_64", "linux-aarch64", "musl-x86_64", "musl-aarch64"]),
+        (["platform_machine == 'aarch64'"], ["linux-aarch64", "musl-aarch64"]),
+        (
+            ["sys_platform == 'darwin'", "sys_platform == 'win32'"],
+            ["macos-arm64", "macos-x86_64", "win-amd64", "win-arm64"],
+        ),
+        (
+            ["sys_platform == 'linux' and platform_machine == 'aarch64'", "platform_machine == 'aarch64'"],
+            ["linux-aarch64", "musl-aarch64"],
+        ),
+    ],
+)
+@pytest.mark.parametrize("input_kind", ["directory", "file", "package"])
+def test_uv_required_environments(capsys, tmp_path, monkeypatch, fake_pypi, markers, expected, input_kind):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.uv]\nrequired-environments = " + json.dumps(markers), encoding="utf-8"
+    )
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("purewheel==3.1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    item = {"directory": str(tmp_path), "file": str(requirements), "package": "purewheel==3.1"}[input_kind]
+    code, out, err = run(capsys, item, "-p", "3.13", "--json")
+    assert code == 0
+    assert [t["platform"] for t in json.loads(out)["targets"]] == expected
+    project_path = "pyproject.toml" if input_kind == "package" else str(tmp_path / "pyproject.toml")
+    assert "[tool.uv] required-environments" in err and project_path in err
+    assert all(name in err for name in expected)
+    if "musl-aarch64" in expected:
+        assert "glibc" in err and "musl" in err
+    assert fake_pypi == ["https://pypi.org/pypi/purewheel/3.1/json"]
+
+
+@pytest.mark.parametrize(
+    "config,image,flags,expected",
+    [
+        ("", False, ["-t", "win-amd64"], "win-amd64"),
+        ('targets = ["macos-arm64"]', False, [], "macos-arm64"),
+        ('targets = ["macos-arm64"]', True, [], "musl-x86_64"),
+        ('targets = ["macos-arm64"]', True, ["-t", "win-amd64"], "win-amd64"),
+    ],
+)
+def test_uv_required_environments_precedence(capsys, tmp_path, monkeypatch, fake_pypi, config, image, flags, expected):
+    # Even invalid uv settings are irrelevant when another source selects the targets.
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.uv]\nrequired-environments = ["invalid marker"]\n[tool.wheelgap]\n' + config,
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    if image:
+        (tmp_path / "Dockerfile").write_text("FROM python:3.13-alpine\n", encoding="utf-8")
+        flags = [*flags, "--dockerfile", str(tmp_path / "Dockerfile")]
+    code, out, err = run(capsys, "purewheel==3.1", "-p", "3.13", "--json", *flags)
+    assert code == 0 and not err
+    assert [t["platform"] for t in json.loads(out)["targets"]] == [expected]
+
+
+@pytest.mark.parametrize("python_source", ["flag", "config", "version-file", "running", "multiple"])
+def test_uv_required_environments_uses_selected_python(capsys, tmp_path, monkeypatch, fake_pypi, python_source):
+    text = "[tool.uv]\nrequired-environments = [\"python_version >= '3.13' and sys_platform == 'win32'\"]\n"
+    flags = []
+    (tmp_path / ".python-version").write_text("3.12\n", encoding="utf-8")
+    if python_source == "config":
+        text += '[tool.wheelgap]\npython = ["3.13"]\n'
+    elif python_source == "version-file":
+        (tmp_path / ".python-version").write_text("3.13\n", encoding="utf-8")
+    elif python_source == "running":
+        (tmp_path / ".python-version").unlink()
+        monkeypatch.setattr(cli, "running_python", lambda: "3.13")
+    else:
+        flags = ["-p", "3.12,3.13"] if python_source == "multiple" else ["-p", "3.13"]
+    (tmp_path / "pyproject.toml").write_text(text, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    code, out, err = run(capsys, "purewheel==3.1", "--json", *flags)
+    assert code == 0 and "required-environments" in err
+    expected_pys = ["3.12", "3.13"] if python_source == "multiple" else ["3.13"]
+    assert [(t["python"], t["platform"]) for t in json.loads(out)["targets"]] == [
+        (py, plat) for py in expected_pys for plat in ("win-amd64", "win-arm64")
+    ]
+
+
+@pytest.mark.parametrize(
+    "setting,message",
+    [
+        ("required-environments = 42", "a string or a list of strings"),
+        ('required-environments = "linux"', "invalid marker"),
+        ("required-environments = [42]", "list of strings"),
+        ('required-environments = ["sys_platform == \'linux\'", "invalid"]', "invalid marker"),
+        ('required-environments = [""]', "invalid marker"),
+    ],
+)
+def test_uv_required_environments_errors(capsys, tmp_path, monkeypatch, fake_pypi, setting, message):
+    (tmp_path / "pyproject.toml").write_text("[tool.uv]\n" + setting, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    code, out, err = run(capsys, "purewheel==3.1", "-p", "3.13", "--json")
+    assert code == 2 and not fake_pypi
+    assert message in err and "required-environments" in err
+    assert "error" in json.loads(out)
+
+
+def test_uv_required_environments_accepts_a_single_string(capsys, tmp_path, monkeypatch, fake_pypi):
+    # uv documents required-environments as a string or a list of strings.
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.uv]\nrequired-environments = \"sys_platform == 'win32'\"", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    code, out, err = run(capsys, "purewheel==3.1", "-p", "3.13", "--json")
+    assert code == 0 and "required-environments" in err
+    assert [t["platform"] for t in json.loads(out)["targets"]] == ["win-amd64", "win-arm64"]
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "required-environments = [\"sys_platform == 'emscripten'\"]",
+        "required-environments = [\"sys_platform == 'android'\"]",
+        "required-environments = [\"python_version < '3.13'\"]",
+    ],
+)
+def test_uv_required_environments_matching_no_target_falls_back_to_defaults(
+    capsys, tmp_path, monkeypatch, fake_pypi, setting
+):
+    # A mobile-only project, or `wheelgap requests` run in such a folder, still gets an answer.
+    (tmp_path / "pyproject.toml").write_text("[tool.uv]\n" + setting, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    code, out, err = run(capsys, "purewheel==3.1", "-p", "3.13", "--json")
+    assert code == 0
+    assert "matches none of the native targets" in err and "default targets" in err
+    assert [t["platform"] for t in json.loads(out)["targets"]] == DEFAULT_PLATFORMS
+
+
+@pytest.mark.parametrize("setting", ["", "required-environments = []", "environments = [\"sys_platform == 'linux'\"]"])
+def test_uv_required_environments_absent_or_empty(capsys, tmp_path, monkeypatch, fake_pypi, setting):
+    (tmp_path / "pyproject.toml").write_text("[tool.uv]\n" + setting, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    code, out, err = run(capsys, "purewheel==3.1", "-p", "3.13", "--json")
+    assert code == 0 and not err
+    assert [t["platform"] for t in json.loads(out)["targets"]] == DEFAULT_PLATFORMS
+
+
+@pytest.mark.parametrize("flags", [[], ["--markdown"]])
+def test_uv_required_environments_note_is_on_stderr(capsys, tmp_path, monkeypatch, fake_pypi, flags):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.uv]\nrequired-environments = [\"sys_platform == 'linux'\"]", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    code, out, err = run(capsys, "purewheel==3.1", "-p", "3.13", *flags)
+    assert code == 0
+    assert "required-environments" in err and "required-environments" not in out
+
+
+def test_uv_required_environments_note_is_hidden_with_quiet(capsys, tmp_path, monkeypatch, fake_pypi):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.uv]\nrequired-environments = [\"sys_platform == 'linux'\"]", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    code, out, err = run(capsys, "purewheel==3.1", "-p", "3.13", "--quiet")
+    assert code == 0 and not err and not out
 
 
 @pytest.mark.parametrize(
