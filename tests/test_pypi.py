@@ -8,8 +8,114 @@ import pytest
 
 import wheelgap
 from wheelgap import Status, pypi
+from wheelgap.cli import main
 from wheelgap.pyodide import PyodideLockError, load_pyodide_lock
 from wheelgap.sources import Package, SourceError, load_inputs
+
+
+@pytest.mark.parametrize("python,expected", [("3.9", "1.0"), ("3.13", "2.0"), (None, "2.0")])
+def test_range_requires_python(fake_pypi, python, expected):
+    pkg = pypi.fill(Package("pythonranged", None, spec=">=1,<3"), python=python)
+    assert pkg.error is None and pkg.version == expected
+    assert pkg.files == [f"pythonranged-{expected}-py3-none-any.whl"]
+    assert fake_pypi == ["https://pypi.org/pypi/pythonranged/json"]
+
+
+@pytest.mark.parametrize(
+    "python,expected", [("3.9", "1.0"), ("3.13", "2.0"), ("3.13,3.13t", "2.0"), ("3.9,3.13", "2.0")]
+)
+def test_range_requires_python_cli(fake_pypi, capsys, tmp_path, monkeypatch, python, expected):
+    monkeypatch.chdir(tmp_path)
+    assert main(["pythonranged>=1,<3", "-p", python, "-t", "linux,windows", "--json"]) == 0
+    output = capsys.readouterr()
+    assert not output.err
+    (package,) = json.loads(output.out)["packages"]
+    assert package["version"] == expected
+    assert set(package["results"].values()) == {"wheel"}
+
+
+@pytest.mark.parametrize("python,expected", [("3.9", "1.0"), ("3.13", "2.0"), ("3.9,3.13", "2.0")])
+def test_range_requires_python_lockfile_api(fake_pypi, tmp_path, python, expected):
+    path = tmp_path / "requirements.txt"
+    path.write_text("pythonranged>=1,<3\n", encoding="utf-8")
+    targets = wheelgap.make_targets(python=python, platforms="linux,windows")
+    (result,) = wheelgap.check_lockfile(path, targets)
+    assert result.version == expected and result.ok
+    assert fake_pypi == ["https://pypi.org/pypi/pythonranged/json"]
+
+
+@pytest.mark.parametrize("requires_python", [None, "", "not a specifier", 42])
+def test_range_requires_python_missing_or_invalid(monkeypatch, requires_python):
+    entry = {"filename": "x-2-py3-none-any.whl", "requires_python": requires_python}
+    monkeypatch.setattr(pypi, "fetch_json", lambda url: {"releases": {"2": [entry]}})
+    pkg = pypi.fill(Package("x", None, spec=">=1"), python="3.9")
+    assert pkg.version == "2" and not pkg.error
+
+
+@pytest.mark.parametrize(
+    "requires_python,python,ok",
+    [(">=3.8.1", "3.8", True), ("!=3.9.0", "3.9", True), ("<3.9.5", "3.9", False), (">=3.10", "3.9", False)],
+)
+def test_range_requires_python_patch_level_specifiers(monkeypatch, requires_python, python, ok):
+    # A target "3.8" stands for a current 3.8.x interpreter, not 3.8.0 (flake8 6 requires >=3.8.1).
+    entry = {"filename": "x-2-py3-none-any.whl", "requires_python": requires_python}
+    monkeypatch.setattr(pypi, "fetch_json", lambda url: {"releases": {"2": [entry]}})
+    pkg = pypi.fill(Package("x", None, spec=">=1"), python=python)
+    assert (pkg.version == "2") is ok
+
+
+@pytest.mark.parametrize("yanked,expected", [(False, "2"), (True, "1")])
+def test_range_requires_python_mixed_files(monkeypatch, yanked, expected):
+    older = {"filename": "x-1-py3-none-any.whl", "requires_python": ">=3.8"}
+    newer = [
+        {"filename": "x-2-py3-none-any.whl", "requires_python": ">=3.10"},
+        {"filename": "x-2.tar.gz", "requires_python": ">=3.8", "yanked": yanked},
+    ]
+    monkeypatch.setattr(pypi, "fetch_json", lambda url: {"releases": {"1": [older], "2": newer}})
+    pkg = pypi.fill(Package("x", None, spec=">=1"), python="3.9")
+    assert pkg.version == expected and not pkg.error
+    assert pkg.files == (["x-2.tar.gz"] if expected == "2" else [older["filename"]])
+
+
+def test_range_requires_python_no_compatible_release(fake_pypi):
+    pkg = pypi.fill(Package("pythonranged", None, spec=">=2"), python="3.9")
+    assert pkg.version is None and pkg.files is None
+    assert pkg.error == "no release matches >=2 for Python 3.9"
+
+
+@pytest.mark.parametrize("python,expected", [("3.9", None), ("3.13", "2.0")])
+def test_range_requires_python_mirror_fallback(monkeypatch, python, expected):
+    data = {"info": {"version": "2.0"}, "urls": [{"filename": "x-2.0.tar.gz", "requires_python": ">=3.10"}]}
+    monkeypatch.setattr(pypi, "fetch_json", lambda url: data)
+    pkg = pypi.fill(Package("x", None, spec=">=1"), python=python)
+    assert pkg.version == expected
+    if expected is None:
+        assert pkg.error == "unexpected response from the index" and pkg.files is None
+    else:
+        assert not pkg.error and pkg.files == ["x-2.0.tar.gz"]
+
+
+@pytest.mark.parametrize("version", [None, "2.0"])
+def test_range_requires_python_keeps_bare_names_and_pins_unchanged(fake_pypi, version):
+    pkg = pypi.fill(Package("pythonranged", version), python="3.9")
+    assert pkg.version == "2.0" and not pkg.error
+
+
+@pytest.mark.parametrize("python,expected", [("3.9", "3.9"), ("3.13,3.13t", "3.13"), ("3.9,3.13", None)])
+def test_range_requires_python_package_api_forwarding(fake_pypi, monkeypatch, python, expected):
+    from wheelgap import api
+
+    calls = []
+
+    def fill_all(packages, **kwargs):
+        calls.append(kwargs)
+        return pypi.fill_all(packages, **kwargs)
+
+    monkeypatch.setattr(api, "fill_all", fill_all)
+    targets = wheelgap.make_targets(python=python, platforms="linux,windows")
+    (result,) = wheelgap.check_packages(["purewheel"], targets, workers=2)
+    assert result.ok
+    assert calls == [{"workers": 2, "python": expected}]
 
 
 def test_version_range_checks_the_newest_matching_release(fake_pypi, tmp_path):

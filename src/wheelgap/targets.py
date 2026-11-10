@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import cached_property
 
@@ -358,6 +359,15 @@ class Target:
 
     def accepts(self, wheel_tags: frozenset[Tag]) -> bool:
         return not self.tags.isdisjoint(wheel_tags)
+
+
+def single_python(targets: Iterable[Target]) -> str | None:
+    """The shared major.minor, ignoring the free-threaded ABI; None for mixed or empty targets."""
+    versions = {(t.major, t.minor) for t in targets}
+    if len(versions) == 1:
+        major, minor = versions.pop()
+        return f"{major}.{minor}"
+    return None
 
 
 def build_targets(

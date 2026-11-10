@@ -44,6 +44,7 @@ from .targets import (
     parse_version_pair,
     resolve_distro,
     resolve_platform,
+    single_python,
 )
 
 EXAMPLES = """\
@@ -729,7 +730,7 @@ def main(argv: list[str] | None = None) -> int:
         return input_error_json(e) if args.json else 2
 
     packages = [p for s in sources for p in s.packages]
-    other_index = fill_all(packages, refresh=args.online)
+    other_index = fill_all(packages, refresh=args.online, python=single_python(targets))
     if args.online and other_index and not quiet:
         print(
             f"wheelgap: note: --online looks up PyPI packages only; kept the locked files of {other_index} "
