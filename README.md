@@ -132,6 +132,25 @@ Use `-q` / `--quiet` (or `quiet = true` in `[tool.wheelgap]`) to show only the g
 
 Run `wheelgap --list-targets` to see target aliases and compatibility limits, or add `--json` for a machine-readable list.
 
+If you know the deployment distro rather than its libc version, use `--distro`:
+
+```bash
+wheelgap uv.lock -p 3.13 -t linux-aarch64 --distro ubuntu-22.04
+wheelgap uv.lock -p 3.13 -t musl-aarch64 --distro alpine
+```
+
+It supplies a glibc or musl version only: it does **not** select Python versions or platforms. Keep using `-t` for those platforms, including `musl-*` for Alpine. You can also set `distro = "ubuntu-22.04"` in `[tool.wheelgap]`.
+
+| distro names | libc version | package sources |
+| --- | --- | --- |
+| `ubuntu-20.04`, `ubuntu-22.04`, `ubuntu-24.04` | glibc 2.31, 2.35, 2.39 | [Focal](https://launchpad.net/ubuntu/focal/+source/glibc), [Jammy](https://packages.ubuntu.com/jammy/libc6), [Noble](https://packages.ubuntu.com/noble/libc6) |
+| `debian-11` / `bullseye`, `debian-12` / `bookworm`, `debian-13` / `trixie` | glibc 2.31, 2.36, 2.41 | [Bullseye](https://packages.debian.org/bullseye/libc6), [Bookworm](https://packages.debian.org/bookworm/libc6), [Trixie](https://packages.debian.org/trixie/libc6) |
+| `rhel-8` / `rocky-8` / `alma-8`, `rhel-9` / `rocky-9` / `alma-9` | glibc 2.28, 2.34 | [RHEL 8](https://access.redhat.com/errata/RHSA-2021:1585), [RHEL 9](https://access.redhat.com/errata/RHBA-2022:3917) |
+| `amazonlinux-2`, `amazonlinux-2023` | glibc 2.26, 2.34 | [Amazon Linux toolchain packages](https://docs.aws.amazon.com/linux/al2023/ug/glibc-gcc-and-binutils.html) |
+| `alpine` | musl 1.2 (Alpine 3.13 and later) | [Alpine musl](https://pkgs.alpinelinux.org/package/v3.22/main/x86_64/musl) |
+
+For each libc, an explicit `--glibc` / `--musl` wins, then `--distro`, then a version from `--dockerfile`, then a `glibc` / `musl` config value, then the config `distro`, then the built-in default. A distro only supplies its own libc; the other libc keeps its existing default. Names are case-insensitive; unknown names are errors. For older Alpine, pass `--musl 1.1` explicitly. The text `--list-targets` output also lists distro names; its JSON output remains a list of platforms.
+
 Only x86 Linux takes `manylinux` wheels older than glibc 2.17: every other architecture's first manylinux was `manylinux2014` (glibc 2.17), so pip accepts nothing older there, and neither does wheelgap.
 
 | name | aliases | wheel tags it accepts |

@@ -9,6 +9,33 @@ from functools import cached_property
 from packaging import tags
 from packaging.tags import Tag
 
+# Shared with Dockerfile image parsing. Versions are the major/minor libc ABI,
+# not the distribution's package revision (see the distro package links in README).
+DEBIAN_GLIBC = {"bullseye": "2.31", "bookworm": "2.36", "trixie": "2.41"}
+ALPINE_MUSL = "1.2"  # Alpine 3.13 and later; use --musl 1.1 for older releases.
+DISTROS: dict[str, tuple[str, str]] = {
+    "ubuntu-20.04": ("glibc", "2.31"),
+    "ubuntu-22.04": ("glibc", "2.35"),
+    "ubuntu-24.04": ("glibc", "2.39"),
+    "debian-11": ("glibc", DEBIAN_GLIBC["bullseye"]),
+    "debian-12": ("glibc", DEBIAN_GLIBC["bookworm"]),
+    "debian-13": ("glibc", DEBIAN_GLIBC["trixie"]),
+    "rhel-8": ("glibc", "2.28"),
+    "rhel-9": ("glibc", "2.34"),
+    "amazonlinux-2": ("glibc", "2.26"),
+    "amazonlinux-2023": ("glibc", "2.34"),
+    "alpine": ("musl", ALPINE_MUSL),
+}
+DISTRO_ALIASES = {
+    "bullseye": "debian-11",
+    "bookworm": "debian-12",
+    "trixie": "debian-13",
+    "rocky-8": "rhel-8",
+    "rocky-9": "rhel-9",
+    "alma-8": "rhel-8",
+    "alma-9": "rhel-9",
+}
+
 # Short platform name -> (family, arch)
 PLATFORMS: dict[str, tuple[str, str]] = {
     "linux-x86_64": ("manylinux", "x86_64"),
@@ -156,6 +183,16 @@ _PY_RE = re.compile(r"^(?:cp|py)?(\d)\.?(\d{1,2})(t?)$", re.ASCII)  # \d is ASCI
 
 class TargetError(ValueError):
     pass
+
+
+def resolve_distro(name: str) -> tuple[str, str]:
+    """Return the libc option and version for a distro, without selecting platforms."""
+    normalized = name.strip().lower()
+    try:
+        return DISTROS[DISTRO_ALIASES.get(normalized, normalized)]
+    except KeyError:
+        known = ", ".join((*DISTROS, *DISTRO_ALIASES))
+        raise TargetError(f"unknown distro {name!r} (known: {known})") from None
 
 
 def _norm(name: str) -> str:

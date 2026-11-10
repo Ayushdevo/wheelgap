@@ -21,6 +21,7 @@ uvx wheelgap@latest -p 3.13 -t linux-aarch64,musl-aarch64 --json
   - A `[tool.wheelgap]` table in `pyproject.toml`: its defaults apply with no `-p`/`-t`.
   - Otherwise ask, or use `-t all` (the eight common platforms).
   - `uvx wheelgap@latest --list-targets` lists every target and alias.
+- **Libc:** if the user names a deployment distro, verify its libc version and pass `--glibc X.Y` or `--musl X.Y` explicitly. These version options do not select platforms; Alpine still needs a `musl-*` target.
 
 ## Read the result
 

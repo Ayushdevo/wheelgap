@@ -27,6 +27,8 @@ from .targets import (
     DEFAULT_MACOS,
     DEFAULT_MUSL,
     DEFAULT_PLATFORMS,
+    DISTRO_ALIASES,
+    DISTROS,
     EXTRA_ARCHES,
     MANYLINUX_FLOOR,
     MANYLINUX_X86_ARCHES,
@@ -38,6 +40,7 @@ from .targets import (
     parse_api_level,
     parse_ios_version,
     parse_version_pair,
+    resolve_distro,
     resolve_platform,
 )
 
@@ -104,6 +107,11 @@ def make_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--glibc", metavar="X.Y", help=f"glibc version for linux-* targets (default: {DEFAULT_GLIBC})")
     p.add_argument("--musl", metavar="X.Y", help=f"musl version for musl-* targets (default: {DEFAULT_MUSL})")
+    p.add_argument(
+        "--distro",
+        metavar="NAME",
+        help="default glibc/musl version from a distro, e.g. ubuntu-22.04 (does not select -t)",
+    )
     p.add_argument("--macos", metavar="X.Y", help=f"minimum macOS for macos-* targets (default: {DEFAULT_MACOS})")
     p.add_argument("--ios", metavar="X.Y", help=f"minimum iOS for ios-* targets (default: {DEFAULT_IOS})")
     p.add_argument(
@@ -160,7 +168,7 @@ def make_parser() -> argparse.ArgumentParser:
 
 FAIL_ON = ("source", "missing")
 LIST_KEYS = ("python", "targets", "ignore")
-STR_KEYS = ("glibc", "musl", "macos", "ios", "android-api", "fail-on", "pyodide-lock")
+STR_KEYS = ("glibc", "musl", "macos", "ios", "android-api", "fail-on", "distro", "pyodide-lock")
 
 
 def project_dir(inputs: list[str]) -> Path:
@@ -223,6 +231,7 @@ def load_config(path: Path) -> dict:
                     "musl": 'a string like "1.2"',
                     "macos": 'a string like "14.0"',
                     "fail-on": 'a string like "missing"',
+                    "distro": 'a string like "ubuntu-22.04"',
                     "pyodide-lock": "a path or URL string",
                 }.get(key, 'a string like "2.31"')
                 raise SourceError(f"{path}: [tool.wheelgap] {key} must be {example}")
@@ -393,14 +402,29 @@ def report_json(
     )
 
 
+def libc_versions(args: argparse.Namespace, config: dict) -> tuple[str, str]:
+    """CLI libc > CLI distro > Dockerfile/config libc > config distro > built-ins."""
+    defaults = {}
+    if "distro" in config:
+        key, version = resolve_distro(config["distro"])  # validate it even when --distro wins
+        if args.distro is None:
+            defaults[key] = version
+    defaults.update(config)
+    if args.distro is not None:
+        key, version = resolve_distro(args.distro)
+        defaults[key] = version
+    return args.glibc or defaults.get("glibc", DEFAULT_GLIBC), args.musl or defaults.get("musl", DEFAULT_MUSL)
+
+
 def print_target_list(args: argparse.Namespace, config: dict) -> None:
     aliases: dict[str, list[str]] = {name: [] for name in PLATFORMS}
     for alias, name in ALIASES.items():
         aliases[name].append(alias)
 
+    glibc_version, musl_version = libc_versions(args, config)
     versions = {
-        "manylinux": ("glibc", args.glibc or config.get("glibc", DEFAULT_GLIBC)),
-        "musllinux": ("musl", args.musl or config.get("musl", DEFAULT_MUSL)),
+        "manylinux": ("glibc", glibc_version),
+        "musllinux": ("musl", musl_version),
         "macos": ("macOS", args.macos or config.get("macos", DEFAULT_MACOS)),
     }
     limits = {}
@@ -443,6 +467,10 @@ def print_target_list(args: argparse.Namespace, config: dict) -> None:
     for name, names, accepts in table:
         print(f"{name:<{name_width}}  {names:<{alias_width}}  {accepts}")
     print("Docker platform names like linux/arm64 also work.")
+    print("\nDistros (--distro supplies a libc version, not a target):")
+    for name, (libc, version) in DISTROS.items():
+        names = ", ".join(alias for alias, canonical in DISTRO_ALIASES.items() if canonical == name)
+        print(f"  {name:<18} {libc} {version}" + (f" (also {names})" if names else ""))
 
 
 def worst_status(row: Row) -> Status:
@@ -591,11 +619,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.target = [musl_docker_names(item) for item in args.target]
             config.update(python=[image.python], targets=[image.platform])
             config.update({k: v for k, v in (("glibc", image.glibc), ("musl", image.musl)) if v})
+        glibc_version, musl_version = libc_versions(args, config)
         targets = build_targets(
             args.python or config.get("python") or read_python_version(project_dir(args.inputs)) or [running_python()],
             args.target or config.get("targets", []),
-            args.glibc or config.get("glibc", DEFAULT_GLIBC),
-            args.musl or config.get("musl", DEFAULT_MUSL),
+            glibc_version,
+            musl_version,
             args.macos or config.get("macos", DEFAULT_MACOS),
             args.ios or config.get("ios", DEFAULT_IOS),
             args.android_api or config.get("android-api", DEFAULT_ANDROID_API),

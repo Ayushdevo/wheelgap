@@ -15,6 +15,110 @@ def run(capsys, *argv):
     return code, out.out, out.err
 
 
+@pytest.mark.parametrize(
+    "config,image,flags,expected",
+    [
+        ("", None, ["--distro", "ubuntu-24.04"], "wheel"),
+        ("", None, ["--distro", "ubuntu-22.04"], "missing"),
+        ('distro = "ubuntu-24.04"', None, [], "wheel"),
+        ('distro = "ubuntu-24.04"\nglibc = "2.35"', None, [], "missing"),
+        ('glibc = "2.35"', None, ["--distro", "ubuntu-24.04"], "wheel"),
+        ('distro = "ubuntu-22.04"', None, ["--distro", "ubuntu-24.04"], "wheel"),
+        ('distro = "ubuntu-24.04"', "3.13-bookworm", [], "missing"),
+        ('distro = "ubuntu-22.04"', "3.13-trixie", [], "wheel"),
+        ('glibc = "2.41"', "3.13-bookworm", ["--distro", "ubuntu-24.04"], "wheel"),
+        ("", "3.13-trixie", ["--distro", "ubuntu-22.04"], "missing"),
+        ("", "3.13-bookworm", ["--distro", "ubuntu-24.04", "--glibc", "2.35"], "missing"),
+        ("", None, ["--glibc", "2.39", "--distro", "ubuntu-22.04"], "wheel"),
+        ('distro = "ubuntu-24.04"', None, ["--glibc", "2.35"], "missing"),
+        ('distro = "ubuntu-22.04"', "3.13", [], "wheel"),  # python:3.13 is trixie (2.41), which beats config distro
+        ('distro = "ubuntu-22.04"', "3.13.1-slim", [], "missing"),  # a patch tag sets no glibc: config distro applies
+    ],
+)
+def test_distro_glibc_precedence(capsys, fixtures, tmp_path, fake_pypi, config, image, flags, expected):
+    (tmp_path / "uv.lock").write_bytes((fixtures / "armgap" / "uv.lock").read_bytes())
+    (tmp_path / "pyproject.toml").write_text("[tool.wheelgap]\n" + config + "\n", encoding="utf-8")
+    args = [str(tmp_path), "-p", "3.13", "-t", "linux-aarch64", "--json", *flags]
+    if image:
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.write_text(f"FROM python:{image}\n", encoding="utf-8")
+        args += ["--dockerfile", str(dockerfile)]
+    code, out, err = run(capsys, *args)
+    assert not err and not fake_pypi
+    data = json.loads(out)
+    package = next(p for p in data["packages"] if p["name"] == "newglibc")
+    assert package["results"] == {"linux-aarch64": expected}
+    assert code == (0 if expected == "wheel" else 1)
+
+
+@pytest.mark.parametrize(
+    "config,image,flags,expected",
+    [
+        ('musl = "1.1"', None, ["--distro", "alpine"], "wheel"),
+        ('distro = "alpine"', None, [], "wheel"),
+        ('distro = "alpine"\nmusl = "1.1"', None, [], "source"),
+        ("", "3.13-alpine3.12", ["--distro", "alpine"], "wheel"),
+        ('distro = "alpine"', "3.13-alpine3.12", [], "source"),
+        ("", None, ["--distro", "alpine", "--musl", "1.1"], "source"),
+        ("", None, ["--musl", "1.1", "--distro", "alpine"], "source"),
+        ('musl = "1.1"', None, ["--distro", "ubuntu-24.04"], "source"),
+    ],
+)
+def test_distro_musl_precedence(capsys, fixtures, tmp_path, fake_pypi, config, image, flags, expected):
+    (tmp_path / "uv.lock").write_bytes((fixtures / "armgap" / "uv.lock").read_bytes())
+    (tmp_path / "pyproject.toml").write_text("[tool.wheelgap]\n" + config + "\n", encoding="utf-8")
+    args = [str(tmp_path), "-p", "3.13", "-t", "musl-x86_64", "--json", *flags]
+    if image:
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.write_text(f"FROM python:{image}\n", encoding="utf-8")
+        args += ["--dockerfile", str(dockerfile)]
+    code, out, err = run(capsys, *args)
+    assert code == 1 and not err and not fake_pypi  # newglibc is always missing on musl
+    package = next(p for p in json.loads(out)["packages"] if p["name"] == "armlib")
+    assert package["results"] == {"musl-x86_64": expected}
+
+
+@pytest.mark.parametrize("distro", ["alpine", "ubuntu-22.04"])
+@pytest.mark.parametrize("selection", [[], ["-t", "all"], ["-t", "win-amd64"], ["-t", "linux/arm64"]])
+def test_distro_does_not_select_targets(capsys, fixtures, distro, selection):
+    args = [str(fixtures / "uvproj"), "-p", "3.13", "--json", *selection]
+    _, before, _ = run(capsys, *args)
+    _, after, _ = run(capsys, *args, "--distro", distro)
+    assert json.loads(before)["targets"] == json.loads(after)["targets"]
+
+
+@pytest.mark.parametrize("flags", [[], ["--distro", "debian-12"]])
+@pytest.mark.parametrize("config", ["distro = 22", 'distro = "typo"', 'distro = ""'])
+def test_invalid_config_distro(capsys, tmp_path, fake_pypi, config, flags):
+    (tmp_path / "pyproject.toml").write_text("[tool.wheelgap]\n" + config, encoding="utf-8")
+    code, out, err = run(capsys, str(tmp_path), *flags)
+    assert code == 2 and not out and not fake_pypi
+    assert "distro" in err and "ubuntu-22.04" in err
+
+
+@pytest.mark.parametrize("extra", [[], ["--glibc", "2.35"], ["--list-targets", "--json"]])
+def test_invalid_cli_distro(capsys, fake_pypi, extra):
+    code, out, err = run(capsys, "--distro", "typo", *extra)
+    assert code == 2 and not fake_pypi
+    assert "unknown distro 'typo'" in err and "ubuntu-22.04" in err
+    if "--json" in extra:  # with --json an input error is also printed as JSON on stdout
+        assert json.loads(out)["error"]["type"] == "TargetError"
+    else:
+        assert not out
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_distro_list_targets_limits(capsys, as_json):
+    args = ["--list-targets", "--distro", "amazonlinux-2"] + (["--json"] if as_json else [])
+    code, out, err = run(capsys, *args)
+    assert code == 0 and not err
+    assert "glibc <= 2.26" in out
+    if as_json:
+        assert [row["name"] for row in json.loads(out)] == list(PLATFORMS)
+    else:
+        assert "ubuntu-22.04" in out and "glibc 2.35" in out and "rocky-9" in out
+
+
 def test_gaps_exit_1(capsys, fixtures):
     code, out, _ = run(capsys, str(fixtures / "uvproj"), "-p", "3.13", "-t", "linux-x86_64,musl-aarch64")
     assert code == 1
