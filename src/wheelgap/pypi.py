@@ -71,6 +71,8 @@ _OPENER = urllib.request.build_opener(_HTTPSRedirectHandler)
 
 def fetch_json(url: str, timeout: float = 20.0, attempts: int = 4) -> dict:
     """GET a JSON document, retrying only what can succeed later: 429, 5xx and dropped connections."""
+    if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+        raise ValueError("attempts must be a positive integer")
     req = urllib.request.Request(url, headers={"User-Agent": f"wheelgap/{__version__}", "Accept": "application/json"})
     last: Exception | None = None
     for attempt in range(attempts):
