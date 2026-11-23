@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 import time
 from collections import Counter
 from datetime import UTC, datetime
@@ -154,7 +155,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     text = json.dumps(data, separators=(",", ":"))
     if args.out:
-        Path(args.out).write_text(text + "\n", encoding="utf-8")
+        destination = Path(args.out)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=destination.parent,
+                prefix=f".{destination.name}.", suffix=".tmp", delete=False,
+            ) as handle:
+                temporary = Path(handle.name)
+                handle.write(text + "\n")
+            temporary.replace(destination)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
     else:
         print(text)
     return 0
