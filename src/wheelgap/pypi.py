@@ -183,6 +183,7 @@ def fill(pkg: Package) -> Package:
         else:
             names = [u["filename"] for u in urls if not u.get("yanked")]
         pkg.files = names
+        pkg.error = None
     except (ValueError, TypeError, KeyError, AttributeError):
         pkg.error = "unexpected response from the index"
     return pkg
