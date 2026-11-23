@@ -82,7 +82,9 @@ def fetch_json(url: str, timeout: float = 20.0, attempts: int = 4) -> dict:
             if e.code != 429 and e.code < 500:
                 raise  # 404, 403, 410...: asking again won't help
             last = e
-            delay = _retry_after(e) or delay
+            server_delay = _retry_after(e)
+            if server_delay is not None:
+                delay = server_delay
         except RedirectRefused:
             raise  # asking again gets the same redirect
         except (urllib.error.URLError, TimeoutError, http.client.HTTPException, ConnectionError) as e:
