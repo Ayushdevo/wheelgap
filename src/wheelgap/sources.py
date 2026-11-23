@@ -442,7 +442,7 @@ def parse_requirements(path: Path, _seen: set[Path] | None = None) -> Source:
         return Source(path.name)
     seen.add(path)
     pkgs: list[Package] = []
-    lines = path.read_text(encoding="utf-8").replace("\\\n", " ").splitlines()
+    lines = path.read_text(encoding="utf-8-sig").replace("\\\n", " ").splitlines()
     for raw in lines:
         line = _COMMENT_RE.split(raw, 1)[0].strip()  # " # note" or "<TAB># note"
         if not line or line.startswith("#"):
