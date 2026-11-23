@@ -172,7 +172,7 @@ def fill(pkg: Package) -> Package:
                 return pkg
             pkg.version, urls = found
         else:
-            urls = _files(data.get("urls", []))
+            urls = _files(data.get("urls"))
             if not pinned:
                 info = data.get("info")
                 pkg.version = info.get("version") if isinstance(info, dict) else None
