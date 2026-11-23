@@ -128,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
         help="exit 1 without writing if more than this share of lookups fail (default: 0.05)",
     )
     args = p.parse_args(argv)
+    if not 0 <= args.max_error_rate <= 1:
+        p.error("argument --max-error-rate: must be between 0 and 1")
 
     started = time.monotonic()
     try:
